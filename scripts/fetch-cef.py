@@ -12,12 +12,31 @@ import tarfile
 ROOT = pathlib.Path(__file__).resolve().parent.parent
 
 
+def host_arch():
+    """Return the CEF build matching the *hardware*, not this Python process.
+
+    Under Rosetta, platform.machine() reports x86_64 even on Apple Silicon, and
+    downloading macosx64 then produces a dylib that cannot load into an arm64
+    Emacs.  hw.optional.arm64 is readable from a translated process and tells
+    us what the machine really is.
+    """
+    probe = subprocess.run(
+        ["sysctl", "-n", "hw.optional.arm64"],
+        capture_output=True, text=True, check=False)
+    if probe.returncode == 0 and probe.stdout.strip() == "1":
+        return "macosarm64"
+    return {"x86_64": "macosx64", "AMD64": "macosx64"}.get(platform.machine())
+
+
 def main():
     if sys.platform != "darwin":
         raise SystemExit("This backend requires macOS")
-    arch = {"arm64": "macosarm64", "x86_64": "macosx64"}.get(platform.machine())
+    arch = host_arch()
     if not arch:
-        raise SystemExit("Unsupported architecture")
+        raise SystemExit("Unsupported architecture: %s" % platform.machine())
+    if sys.argv[1:] == ["--arch"]:
+        print(arch)
+        return
     lock = json.loads((ROOT / "cef.lock.json").read_text())
     name = f"cef_binary_{lock['version']}_{arch}_minimal"
     cache = ROOT / ".deps"
