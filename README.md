@@ -2,6 +2,8 @@
 
 Chromel 是 macOS 上的 Emacs 原生浏览器插件：一个网页对应一个 Emacs buffer，Chromium 视图作为 Emacs 窗口内的 `NSView` 显示。借鉴 Appine 的同进程原生视图方案，使用 CEF 替代 WebKit，不依赖 Qt，不需要修改或重新编译 Emacs 源码；可以安装到现有 `Emacs.app`，也可以使用独立应用副本。
 
+内部原理（三层结构、事件泵、焦点与键盘模型）见 [`docs/architecture.md`](docs/architecture.md)。
+
 首个版本提供网页浏览、导航、独立 profile、Chromium 设置页、浏览历史和 DevTools，支持手动添加密码后的自动填充，以及 Chrome Web Store 安装和扩展管理。普通网页嵌入 Emacs，设置和管理页面在独立窗口中打开。暂不支持 Chrome 同步、书签管理或下载管理。
 
 提供 Vimium 风格的键位、关闭页面恢复、会话自动保存和延迟恢复。Meow 是可选适配，不需要安装即可使用全部浏览器键位。

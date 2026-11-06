@@ -81,6 +81,7 @@
 
 ## D. 文档
 
+- ✅ `docs/architecture.md`：分层、外部消息泵、视图嵌入与坐标系、事件/命令、JS 往返、键盘双路径、焦点、生命周期、不变量、扩展点（README 顶部已链入）。
 - README 明确：CEF 必须在 app bundle 内（`install-app.py` 的理由）、`C-c w E` 与 `s` 的分工、`chromel-allow-raw-javascript` 的取舍、session/history 文件位置与恢复命令。
 - 补 `CHANGELOG.md`，0.1.x 起按"崩溃/安全、交互、测试"三类记录。
 
