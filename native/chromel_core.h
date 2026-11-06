@@ -5,6 +5,7 @@
 namespace chromel {
 void initialize(const std::string& bundle, const std::string& profile);
 long bind_window(const std::string& title);
+bool is_settings_url(const std::string& url);
 int create(long window, const std::string& url);
 void layout(int id, long window, double x, double y, double width, double height);
 void hide(int id);

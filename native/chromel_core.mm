@@ -19,6 +19,9 @@
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
 #include <map>
+#include <vector>
+#include <algorithm>
+#include <cctype>
 #include <filesystem>
 #include <memory>
 #include <cmath>
@@ -69,6 +72,19 @@ std::string profilePath;
 bool testMode = false;
 char handlingEventKey;
 IMP originalSendEvent;
+std::vector<id> observers;
+
+// Releases a flag on every exit path, so one throwing native call cannot wedge
+// a long-lived subsystem such as the message pump.
+class FlagGuard {
+ public:
+  explicit FlagGuard(bool& flag) : flag_(flag) { flag_ = true; }
+  ~FlagGuard() { flag_ = false; }
+  FlagGuard(const FlagGuard&) = delete;
+  FlagGuard& operator=(const FlagGuard&) = delete;
+ private:
+  bool& flag_;
+};
 
 // Chromium initializes as if it owned main(), resetting process signal
 // dispositions.  Emacs relies on SIGALRM and friends for its own event loop.
@@ -123,6 +139,13 @@ NSWindow* windowFor(long handle) {
   if (!win || ![NSApp.windows containsObject:win])
     throw std::runtime_error("Emacs frame no longer exists");
   return win;
+}
+// CEF may hand out a null or detached main frame while a page is tearing down.
+// Every caller must tolerate that instead of dereferencing it.
+CefRefPtr<CefFrame> mainFrame(const CefRefPtr<CefBrowser>& browser) {
+  if (!browser) return nullptr;
+  auto frame = browser->GetMainFrame();
+  return frame && frame->IsValid() ? frame : nullptr;
 }
 bool ownsFocus(const std::shared_ptr<Page>& page) {
   NSResponder* responder = page->container.window.firstResponder;
@@ -221,6 +244,7 @@ class App final : public CefApp, public CefBrowserProcessHandler {
 };
 
 bool isSettingsURL(const std::string& url);
+bool isPrivilegedChromeURL(const std::string& url);
 
 class Client final : public CefClient,
                      public CefLifeSpanHandler,
@@ -274,18 +298,22 @@ class Client final : public CefClient,
   }
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
                                 CefProcessId source, CefRefPtr<CefProcessMessage> message) override {
+    if (!message) return false;
     if (source == PID_RENDERER && message->GetName() == "chromel.input-focus") {
       auto found = pages.find(id_);
-      if (found != pages.end() && !found->second->closing && frame) {
+      auto args = message->GetArgumentList();
+      if (found != pages.end() && !found->second->closing && frame && args && args->GetSize() >= 1) {
         found->second->inputFrame = frame->GetIdentifier().ToString();
-        found->second->inputControl = message->GetArgumentList()->GetBool(0);
+        found->second->inputControl = args->GetBool(0);
       }
       return true;
     }
-    if (source != PID_RENDERER || message->GetName() != "chromel.eval.result" || !frame->IsMain())
+    if (source != PID_RENDERER || message->GetName() != "chromel.eval.result" ||
+        !frame || !frame->IsMain())
       return false;
-    auto found = pages.find(id_);
     auto args = message->GetArgumentList();
+    if (!args || args->GetSize() < 3) return true;
+    auto found = pages.find(id_);
     const auto token = args->GetString(0).ToString();
     if (found != pages.end() && !found->second->closing &&
         !token.empty() && found->second->pendingEval == token) {
@@ -340,11 +368,16 @@ class Client final : public CefClient,
     return true;
   }
   bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
-                      CefRefPtr<CefRequest> request, bool, bool) override {
+                      CefRefPtr<CefRequest> request, bool userGesture, bool) override {
     // The Web Store installer and management WebUIs need a Chrome-style host.
     // Defer window creation to Emacs's event queue, outside the CEF callback.
-    if (id_ > 0 && frame->IsMain() && isSettingsURL(request->GetURL().ToString())) {
-      emit(id_, @"chrome-ui", ns(request->GetURL().ToString()));
+    // Page-initiated handoff of the Web Store is a feature (test/gui-management
+    // relies on it); privileged chrome:// pages additionally require a user
+    // gesture, so a scripted redirect cannot raise a WebUI host by itself.
+    const auto target = request ? request->GetURL().ToString() : std::string();
+    if (id_ > 0 && frame && frame->IsMain() && isSettingsURL(target) &&
+        (userGesture || !isPrivilegedChromeURL(target))) {
+      emit(id_, @"chrome-ui", ns(target));
       return true;
     }
     return false;
@@ -478,15 +511,32 @@ class SettingsWindowDelegate final : public CefWindowDelegate {
   IMPLEMENT_REFCOUNTING(SettingsWindowDelegate);
 };
 
-bool isSettingsURL(const std::string& url) {
+// Schemes and hosts are case-insensitive; Chromium lowercases them before
+// navigating, so the matcher must too or uppercase input bypasses it.
+std::string loweredAuthority(const std::string& url) {
+  if (url.find("://") == std::string::npos) return url;
+  std::string copy = url;
+  const auto start = url.find("://") + 3;
+  const auto end = url.find_first_of("/?#", start);
+  const auto limit = end == std::string::npos ? copy.size() : end;
+  std::transform(copy.begin(), copy.begin() + static_cast<std::ptrdiff_t>(limit), copy.begin(),
+                 [](unsigned char c) { return static_cast<char>(std::tolower(c)); });
+  return copy;
+}
+bool isPrivilegedChromeURL(const std::string& rawUrl) {
+  const auto url = loweredAuthority(rawUrl);
   return url == "chrome://extensions" || url.starts_with("chrome://extensions/") ||
     url.starts_with("chrome://extensions?") || url.starts_with("chrome://extensions#") ||
-    url == "https://chromewebstore.google.com" || url.starts_with("https://chromewebstore.google.com/") ||
-    url.starts_with("https://chromewebstore.google.com?") || url.starts_with("https://chromewebstore.google.com#") ||
     url == "chrome://password-manager" || url.starts_with("chrome://password-manager/") ||
     url.starts_with("chrome://password-manager?") || url.starts_with("chrome://password-manager#") ||
     url == "chrome://settings" || url.starts_with("chrome://settings/") ||
     url.starts_with("chrome://settings?") || url.starts_with("chrome://settings#");
+}
+bool isSettingsURL(const std::string& rawUrl) {
+  const auto url = loweredAuthority(rawUrl);
+  return isPrivilegedChromeURL(url) ||
+    url == "https://chromewebstore.google.com" || url.starts_with("https://chromewebstore.google.com/") ||
+    url.starts_with("https://chromewebstore.google.com?") || url.starts_with("https://chromewebstore.google.com#");
 }
 void openSettings(const std::string& requested) {
   const auto url = requested.empty() ? std::string("chrome://settings/") : requested;
@@ -506,7 +556,9 @@ void openSettings(const std::string& requested) {
   } else if (!requested.empty()) {
     // An explicit subpage navigates.  M-x chromel-settings merely raises the
     // existing window, preserving a search, dialog or unfinished edit.
-    settingsBrowser->GetMainFrame()->LoadURL(url);
+    auto frame = mainFrame(settingsBrowser);
+    if (!frame) throw std::runtime_error("The management window has no main frame");
+    frame->LoadURL(url);
   }
   if (!testMode) {
     settingsWindow->Restore();
@@ -626,16 +678,20 @@ void initialize(const std::string& bundle, const std::string& profile) {
   const auto helper = bundle + "/Contents/Frameworks/Chromel Helper.app/Contents/MacOS/Chromel Helper";
   if (![[NSFileManager defaultManager] isExecutableFileAtPath:ns(helper)])
     throw std::runtime_error("CEF helper missing; run scripts/build.sh");
-  const auto mainBundle = std::filesystem::canonical(utf8(NSBundle.mainBundle.bundlePath)).string() + "/";
-  const auto frameworkReal = std::filesystem::canonical(framework).string();
+  std::error_code bundleError, frameworkError;
+  const auto mainBundle = std::filesystem::canonical(utf8(NSBundle.mainBundle.bundlePath), bundleError).string() + "/";
+  const auto frameworkReal = std::filesystem::canonical(framework, frameworkError).string();
+  if (bundleError || frameworkError)
+    throw std::runtime_error("Cannot resolve the CEF framework path: " + (bundleError ? bundleError : frameworkError).message());
   if (frameworkReal.compare(0, mainBundle.size(), mainBundle) != 0)
     throw std::runtime_error("CEF sandbox requires its framework inside the running app bundle. Start Emacs with this plugin's scripts/launch.sh (the original Emacs.app is unchanged).");
   if (!cef_load_library((framework + "/Chromium Embedded Framework").c_str()))
     throw std::runtime_error("Unable to load the CEF framework");
   adaptApplication();
   for (NSString* name in @[NSApplicationDidResignActiveNotification, NSWindowDidResignKeyNotification]) {
-    [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil
+    id token = [NSNotificationCenter.defaultCenter addObserverForName:name object:nil queue:nil
       usingBlock:^(NSNotification*) { for (const auto& item : pages) stopScroll(item.second); }];
+    observers.push_back(token);
   }
   queue = [NSMutableArray array];
   windows = [NSMapTable strongToWeakObjectsMapTable];
@@ -686,6 +742,8 @@ long bind_window(const std::string& title) {
   throw std::runtime_error("Cannot identify the Emacs NSWindow by its temporary title");
 }
 
+bool is_settings_url(const std::string& url) { return isSettingsURL(url); }
+
 int create(long handle, const std::string& url) {
   requireReady();
   NSWindow* win = windowFor(handle);
@@ -714,6 +772,11 @@ int create(long handle, const std::string& url) {
   }
   // CEF owns its view; the clipping container belongs to this plugin.
   NSView* view = (__bridge NSView*)page->browser->GetHost()->GetWindowHandle();
+  if (!view) {
+    [page->container removeFromSuperview];
+    pages.erase(page->id);
+    throw std::runtime_error("CEF created a browser without a Cocoa view");
+  }
   page->lifetimeWindow = view.window;
   [view removeFromSuperview];
   [page->container addSubview:view];
@@ -724,6 +787,7 @@ int create(long handle, const std::string& url) {
 void layout(int id, long handle, double x, double y, double width, double height) {
   requireReady();
   auto page = pageFor(id);
+  if (!page->browser) throw std::runtime_error("Browser is gone");
   NSView* host = windowFor(handle).contentView;
   if (page->host != host) {
     unfocus(page);
@@ -737,9 +801,11 @@ void layout(int id, long handle, double x, double y, double width, double height
   NSRect rect = NSMakeRect(x, cy, std::max(0.0, width), std::max(0.0, height));
   if (!NSEqualRects(page->container.frame, rect)) {
     page->container.frame = rect;
-    NSView* view = (__bridge NSView*)page->browser->GetHost()->GetWindowHandle();
-    view.frame = page->container.bounds;
-    page->browser->GetHost()->NotifyMoveOrResizeStarted();
+    NSView* view = page->browser ? (__bridge NSView*)page->browser->GetHost()->GetWindowHandle() : nil;
+    if (view) {
+      view.frame = page->container.bounds;
+      page->browser->GetHost()->NotifyMoveOrResizeStarted();
+    }
   }
   page->container.hidden = width <= 0 || height <= 0;
 }
@@ -816,7 +882,11 @@ void command(int id, const std::string& action, const std::string& argument) {
     if (!frame || !frame->IsValid()) frame = browser->GetMainFrame();
     scrollPage(page, frame, amount, duration, speed, utf8(request[@"mode"]), [request[@"held"] boolValue]);
   }
-  else if (action == "navigate") browser->GetMainFrame()->LoadURL(argument);
+  else if (action == "navigate") {
+    auto frame = mainFrame(browser);
+    if (!frame) throw std::runtime_error("The browser has no main frame");
+    frame->LoadURL(argument);
+  }
   else if (action == "reload") browser->Reload();
   else if (action == "back") browser->GoBack();
   else if (action == "forward") browser->GoForward();
@@ -898,13 +968,23 @@ void command(int id, const std::string& action, const std::string& argument) {
         ![request[@"script"] isKindOfClass:NSString.class])
       throw std::runtime_error("Invalid JavaScript request");
     page->pendingEval = utf8(request[@"token"]);
+    auto frame = mainFrame(browser);
+    if (!frame) {
+      page->pendingEval.clear();
+      throw std::runtime_error("The browser has no main frame");
+    }
     auto message = CefProcessMessage::Create("chromel.eval");
     message->GetArgumentList()->SetString(0, page->pendingEval);
     message->GetArgumentList()->SetString(1, utf8(request[@"script"]));
-    browser->GetMainFrame()->SendProcessMessage(PID_RENDERER, message);
+    frame->SendProcessMessage(PID_RENDERER, message);
   }
   else if (action == "javascript") {
-    browser->GetMainFrame()->ExecuteJavaScript(argument, "", 1);
+    // Fire-and-forget channel for Lisp callers that need no reply; the reply
+    // path above is the only one that can report success.  Elisp gates this
+    // action behind `chromel-allow-raw-javascript'.
+    auto frame = mainFrame(browser);
+    if (!frame) throw std::runtime_error("The browser has no main frame");
+    frame->ExecuteJavaScript(argument, "", 1);
   }
   else if (action == "javascript-focused") {
     // Route through CEF, not top.document: focused subframes may be cross-origin
@@ -963,19 +1043,19 @@ void command(int id, const std::string& action, const std::string& argument) {
 void pump() {
   requireReady();
   if (pumping) return;
-  pumping = true;
+  FlagGuard guard(pumping);
   CefDoMessageLoopWork();
-  pumping = false;
 }
 std::string events() {
   requireReady();
   NSData* data = [NSJSONSerialization dataWithJSONObject:queue options:0 error:nil];
   [queue removeAllObjects];
+  if (!data) return "[]";
   return std::string((const char*)data.bytes, data.length);
 }
 std::string info() {
   requireReady();
-  return "CEF " CEF_VERSION "\nRuntime: Alloy (native child NSView)\nMessage pump: external (Emacs timer)\nSandbox: enabled\nPages: " +
+  return "CEF " CEF_VERSION "\nRuntime: Alloy (native child NSView)\nMessage pump: external (Emacs timer)\nSandbox: renderer helpers only (native/helper.cc initializes cef_sandbox; the Emacs host process is unsandboxed)\nPages: " +
     std::to_string(pages.size()) + "\nBrowsers including DevTools: " +
     std::to_string(browsers.size()) + "\nSettings browsers: " +
     std::to_string(settingsBrowsers.size()) + "\nSettings windows: " +
@@ -986,17 +1066,19 @@ std::string inspect(int id) {
   requireReady();
   if (id == 0) {
     NSView* view = settingsBrowser ? (__bridge NSView*)settingsBrowser->GetHost()->GetWindowHandle() : nil;
+    auto frame = mainFrame(settingsBrowser);
     NSDictionary* state = @{@"count": @(settingsBrowsers.size()),
       @"closing": @(settingsClosing), @"windowAlive": @(settingsWindow != nullptr),
       @"id": @(settingsBrowser ? settingsBrowser->GetIdentifier() : 0),
       @"chrome": @(settingsBrowser && settingsBrowser->GetHost()->GetRuntimeStyle() == CEF_RUNTIME_STYLE_CHROME),
       @"sharedContext": @(settingsBrowser && settingsBrowser->GetHost()->GetRequestContext()->IsSame(CefRequestContext::GetGlobalContext())),
-      @"url": settingsBrowser ? ns(settingsBrowser->GetMainFrame()->GetURL().ToString()) : @"",
+      @"url": frame ? ns(frame->GetURL().ToString()) : @"",
       @"title": ns(settingsTitle), @"window": @(view.window.windowNumber),
       @"testResult": testMode ? ns(settingsTestResult) : @"",
       @"testSuccess": @(testMode && settingsTestSuccess)};
-    NSData* data = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
-    return std::string(static_cast<const char*>(data.bytes), data.length);
+    NSData* payload = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
+    if (!payload) return "{}";
+    return std::string(static_cast<const char*>(payload.bytes), payload.length);
   }
   auto page = pageFor(id);
   NSRect rect = page->container.frame;
@@ -1009,30 +1091,45 @@ std::string inspect(int id) {
     @"hidden": @(page->container.hidden), @"focused": @(ownsFocus(page)),
     @"focusedFrameName": focusedFrame ? ns(focusedFrame->GetName().ToString()) : @"",
     @"hostClass": NSStringFromClass(host.class) ?: @"detached"};
-  NSData* data = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
-  return std::string((const char*)data.bytes, data.length);
+  NSData* geometry = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
+  if (!geometry) return "{}";
+  return std::string((const char*)geometry.bytes, geometry.length);
 }
 void shutdown() {
   checkThread();
   if (!initialized || stopped) return;
   hostWakeup.reset();
+  for (id token : observers) [NSNotificationCenter.defaultCenter removeObserver:token];
+  observers.clear();
   // Copy: CloseBrowser may synchronously modify the live map.
   auto closing = browsers;
   for (const auto& item : closing) item.second->GetHost()->CloseBrowser(true);
   closing.clear();
+  // Pump CEF directly.  Running AppKit's loop here would re-enter EmacsApp.run
+  // from inside kill-emacs and corrupt AppKit's autorelease-pool lifetime.
   const auto deadline = [NSDate dateWithTimeIntervalSinceNow:3.0];
   while ((!browsers.empty() || settingsWindow) && deadline.timeIntervalSinceNow > 0) {
-    CefDoMessageLoopWork();
-    [[NSRunLoop currentRunLoop] runMode:NSDefaultRunLoopMode
-                           beforeDate:[NSDate dateWithTimeIntervalSinceNow:0.005]];
+    @autoreleasepool {
+      CefDoMessageLoopWork();
+    }
+    [NSThread sleepForTimeInterval:0.005];
   }
+  const bool clean = browsers.empty() && !settingsWindow;
+  const size_t remaining = browsers.size();
+  // Drop plugin state on both paths: a stuck renderer must not leave the maps
+  // pointing at Emacs objects that are about to be freed.
+  pages.clear();
+  browsers.clear();
+  settingsBrowsers.clear();
+  settingsBrowser = nullptr;
+  settingsWindow = nullptr;
+  [windows removeAllObjects];
   // Calling CefShutdown with live browsers can crash.  On process exit the OS
   // will reclaim a stuck renderer; keep the framework loaded in that case.
-  if (browsers.empty() && !settingsWindow) {
-    pages.clear();
+  if (clean) {
     CefShutdown();
   } else {
-    NSLog(@"Chromel: skipping CefShutdown because %zu browsers or a settings window did not close", browsers.size());
+    NSLog(@"Chromel: skipping CefShutdown because %zu browsers or a settings window did not close", remaining);
   }
   stopped = true;
 }

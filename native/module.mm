@@ -1,4 +1,5 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
+#import <Foundation/Foundation.h>
 #include <emacs-module.h>
 #include "chromel_core.h"
 #include <exception>
@@ -17,10 +18,17 @@ std::string stringArg(emacs_env* env, emacs_value arg) {
 emacs_value result(emacs_env* env, const std::string& value) {
   return env->make_string(env, value.data(), value.size());
 }
-enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown };
+// Report a native failure as a Lisp error so callers can recover.
+emacs_value signal_(emacs_env* env, const std::string& text) {
+  emacs_value message = result(env, text);
+  emacs_value list = env->funcall(env, env->intern(env, "list"), 1, &message);
+  env->non_local_exit_signal(env, env->intern(env, "error"), list);
+  return env->intern(env, "nil");
+}
+enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl };
 emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexcept {
  @autoreleasepool {
-  emacs_value nil = env->intern(env, "nil");
+  emacs_value nilValue = env->intern(env, "nil");
   try {
     auto integer = [&](int i) { return env->extract_integer(env, args[i]); };
     auto string = [&](int i) { return stringArg(env, args[i]); };
@@ -30,12 +38,12 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
     std::string first, second;
     int64_t numbers[6] = {};
     if (op == Init) { first = string(0); second = string(1); }
-    if (op == Bind) first = string(0);
+    if (op == Bind || op == IsSettingsUrl) first = string(0);
     if (op == Create) { numbers[0] = integer(0); first = string(1); }
     if (op == Layout) for (int i = 0; i < 6; ++i) numbers[i] = integer(i);
     if (op == Hide || op == Command || op == Inspect) numbers[0] = integer(0);
     if (op == Command) { first = string(1); second = string(2); }
-    if (env->non_local_exit_check(env) != emacs_funcall_exit_return) return nil;
+    if (env->non_local_exit_check(env) != emacs_funcall_exit_return) return nilValue;
     switch (op) {
       case Init: chromel::initialize(first, second); break;
       case Bind: return env->make_integer(env, chromel::bind_window(first));
@@ -48,13 +56,23 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
       case Info: return result(env, chromel::info());
       case Inspect: return result(env, chromel::inspect(numbers[0]));
       case Shutdown: chromel::shutdown(); break;
+      case IsSettingsUrl: return chromel::is_settings_url(first) ? env->intern(env, "t") : nilValue;
     }
     return env->intern(env, "t");
   } catch (const std::exception& error) {
-    emacs_value message = result(env, error.what());
-    emacs_value list = env->funcall(env, env->intern(env, "list"), 1, &message);
-    env->non_local_exit_signal(env, env->intern(env, "error"), list);
-    return nil;
+    return signal_(env, error.what());
+  } catch (NSException* exception) {
+    // Cocoa faults (nil subviews, abandoned windows) must not unwind through
+    // Objective-C into Emacs' C frames, which aborts the whole editor.
+    std::string text = "Objective-C exception";
+    @try {
+      text += ": " + std::string((exception.name ?: @"NSException").UTF8String ?: "") +
+              " " + std::string(exception.reason.UTF8String ?: "");
+    } @catch (...) {
+    }
+    return signal_(env, text);
+  } catch (...) {
+    return signal_(env, "Native module failure");
   }
  }
 }
@@ -73,6 +91,7 @@ extern "C" int emacs_module_init(emacs_runtime* runtime) noexcept {
     {"events", 0, Events, "Drain browser events as a JSON array."},
     {"info", 0, Info, "Return native runtime diagnostics."},
     {"inspect", 1, Inspect, "Return actual Cocoa geometry and focus state of browser ID as JSON."},
+    {"is-settings-url", 1, IsSettingsUrl, "Return non-nil when URL belongs in the shared Chrome-style window."},
     {"shutdown", 0, Shutdown, "Close browsers and shut down CEF before Emacs exits."}
   };
   for (const auto& entry : entries) {
