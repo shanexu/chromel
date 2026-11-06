@@ -15,8 +15,13 @@
   ;; Feed an actual Cocoa key while Emacs is reading input.  Accept either
   ;; immediate quit or a Control-g key sequence, as normal C-g can do both.
   (let* ((buffer chromel-test--buffer)
-         (inject (run-at-time 0.1 nil (lambda () (with-current-buffer buffer (chromel--command "test-key" "escape")))))
-         (timeout (run-at-time 3 nil (lambda () (setq unread-command-events (list ?z)))))
+         ;; A posted key event is dropped when macOS has not yet made the
+         ;; disposable window key, which depends on whatever the user clicked
+         ;; last.  Keep offering the key until one arrives; a broken
+         ;; translation still fails, because Escape would then reach Emacs as
+         ;; a prefix key instead of C-g.
+         (inject (run-at-time 0.1 0.25 (lambda () (with-current-buffer buffer (chromel--command "test-key" "escape")))))
+         (timeout (run-at-time 5 nil (lambda () (setq unread-command-events (list ?z)))))
          (key (unwind-protect
                   (condition-case nil (read-key-sequence "Test Escape") (quit 'quit))
                 (cancel-timer inject) (cancel-timer timeout))))

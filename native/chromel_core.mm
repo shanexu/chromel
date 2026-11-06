@@ -237,7 +237,15 @@ class App final : public CefApp, public CefBrowserProcessHandler {
                                      CefRefPtr<CefCommandLine> commandLine) override {
     // Test-only Chromium facility: never ask the user's Keychain to authorize
     // disposable, repeatedly re-signed test apps.  Production uses Keychain.
-    if (testMode && processType.empty()) commandLine->AppendSwitch("use-mock-keychain");
+    if (testMode && processType.empty()) {
+      commandLine->AppendSwitch("use-mock-keychain");
+      // The GUI harness stacks disposable windows behind the user's terminal.
+      // Chromium throttles occluded windows, which made scripted navigation,
+      // rendering and key delivery miss their deadlines at random.
+      commandLine->AppendSwitch("disable-background-timer-throttling");
+      commandLine->AppendSwitch("disable-renderer-backgrounding");
+      commandLine->AppendSwitch("disable-backgrounding-occluded-windows");
+    }
   }
  private:
   IMPLEMENT_REFCOUNTING(App);
@@ -1033,7 +1041,16 @@ void command(int id, const std::string& action, const std::string& argument) {
         timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:page->container.window.windowNumber
         context:nil characters:characters charactersIgnoringModifiers:characters
         isARepeat:NO keyCode:argument == "escape" ? 53 : (argument == "j" ? 38 : 40)];
-      if (argument == "escape") [NSApp postEvent:event atStart:NO];
+      if (argument == "escape") {
+        // A real Escape arrives in an active app whose window is key.  Posted
+        // events to a background app are dropped at random, so make the test
+        // window key first instead of depending on the user's click order.
+        NSWindow* target = page->container.window;
+        if (!target) throw std::runtime_error("Test key needs a window");
+        [NSApp activateIgnoringOtherApps:YES];
+        [target makeKeyAndOrderFront:nil];
+        [NSApp postEvent:event atStart:NO];
+      }
       else [NSApp sendEvent:event];
     }
   }
