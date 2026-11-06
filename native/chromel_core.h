@@ -3,6 +3,10 @@
 #include <string>
 
 namespace chromel {
+// Bumped whenever a chromel--native-* signature or semantic changes; the elisp
+// side refuses to run against a module that reports a different number.
+constexpr int kChromelApiVersion = 1;
+int api_version();
 void initialize(const std::string& bundle, const std::string& profile);
 long bind_window(const std::string& title);
 bool is_settings_url(const std::string& url);

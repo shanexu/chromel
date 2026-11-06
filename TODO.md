@@ -25,11 +25,11 @@
 仓库无 `.github/`。**做法**：macOS runner 上 `build.sh` + ERT + `CHROMEL_TEST_ONLY=smoke,controls` 冒烟（GUI 全套太贵，可 nightly）。
 **验收**：干净 clone 的 PR 能自动跑通构建与 ERT。
 
-### A4 CEF 下载的架构判断
-`scripts/fetch-cef.py:18` 用 `platform.machine()`，在 Rosetta 终端下会选错架构。**做法**：改读 `sysctl -n hw.optional.arm64` 或 `platform.uname().machine` + `arch` 校验。
+### A4 ✅ CEF 下载的架构判断
+原先 `platform.machine()` 在 Rosetta 下返回 `x86_64`，会下载 `macosx64` 而让 arm64 Emacs 加载失败。已改为 `host_arch()`：先读 `sysctl -n hw.optional.arm64`，再回退 `platform.machine()` 映射。`python3 scripts/fetch-cef.py --arch` 可直接自检（本机输出 `macosarm64`）。
 
-### A5 CMake 缺省项
-没有 `CMAKE_OSX_DEPLOYMENT_TARGET`，`CMAKE_BUILD_TYPE` 未给默认值（`build.sh` 传了 Release，IDE/CI 直连 CMake 时是空）。**验收**：裸 `cmake -S . -B build` 也能得到 Release 且部署目标明确。
+### A5 ✅ CMake 缺省项
+已补 `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` 与默认 `CMAKE_BUILD_TYPE=Release`（均仅在未设置时生效）。裸配置后 `CMakeCache.txt` 确认 `Release` / `13.0`，编译标志含 `-mmacosx-version-min=13.0 -O3 -DNDEBUG`，重编 `chromel_core.mm` 零警告。
 
 ### A6 smoke 二进制未接线
 `build/chromel-smoke` 依赖 `NSBundle.mainBundle`，无法独立运行（报 "CEF helper missing; run scripts/build.sh"），且 `test-gui.py` 从不调用它。**做法**：要么嵌入 `EmacsChromel.app` 里运行，要么删掉并以 GUI 测试为准。
@@ -50,8 +50,8 @@
 ### B4 hints.js 每次 follow 从磁盘读
 `chromel.el:838-840` 每次 `insert-file-contents "native/hints.js"`，而 `scroll.js` 是构建期内嵌（`CMakeLists.txt:32-34`）。**做法**：统一由 CMake 生成头文件，Elisp 侧只取字符串。
 
-### B5 没有 Elisp↔模块 ABI 握手
-升级 dylib 但旧 `chromel.el`（或反之）没有检测。**做法**：导出 `chromel--native-version`，`chromel--ensure-module` 里断言主版本。
+### B5 ✅ 没有 Elisp↔模块 ABI 握手
+`chromel_core.h` 新增 `kChromelApiVersion`（=1）与 `api_version()`，模块导出 `chromel--native-api-version`；`chromel-module-api-version` 与 `chromel--check-module-api` 在 `chromel--ensure-module` 末尾断言，缺函数或数字不符都直接 `user-error` 并提示 `./scripts/build.sh`。ERT 增 2 条（一致、`nil` 与 `99` 两种不符），31/31 通过。
 
 ### B6 testMode 渗进生产路径
 `command()`/`click`/`initialize()` 里散落 `testMode` 分支。**做法**：收敛到单一 `isTestMode()` + 一处文档说明，避免将来在正式路径误开。
@@ -67,8 +67,9 @@
 ### C1 延迟标签的半初始化
 `chromel--pending`（`chromel.el:119`，判定见 `:219`、`:346`）的 buffer 在激活前没有浏览器/几何。所有命令都必须先 `chromel--ensure-browser`；补一个 ERT 覆盖"对 pending 标签发命令"。
 
-### C2 搜索引擎写死 DuckDuckGo
-`chromel.el:145` 硬编码 `https://duckduckgo.com/?q=`。**做法**：`defcustom chromel-search-url`（含 `%s`），默认值不变；`chromel--normalize-url` 用它。
+### C2 ✅ 搜索引擎写死 DuckDuckGo
+新增 `defcustom chromel-search-url`（默认 `https://duckduckgo.com/?q=%s`，要求含 `%s`），`chromel--normalize-url` 用 `format` 套用，查询串仍走 `url-hexify-string`。ERT 增加 3 条：默认模板、`%` 转义（`100%25`）、自定义模板生效；29/29 通过。
+> 顺带发现：仓库里的 `chromel.elc` 是未跟踪的构建产物，`load` 会优先加载它，改完 `chromel.el` 直接跑 ERT 会测到旧逻辑（本轮先踩了一次）。建议后续在测试脚本里强制 `load` 源文件或先删 `.elc`。
 
 ### C3 弹窗丢失 `window.opener`
 `OnBeforePopup`/`OnOpenURLFromTab` 一律抑制并由 Emacs 开新标签，脚本弹窗拿不到 opener。**做法**：至少写进 README 的"已知限制"；要支持则区分"用户手势链接"与"脚本 window.open"。

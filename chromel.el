@@ -588,6 +588,12 @@ not create a browser tab."
   "Non-nil once the dynamic module is present in this Emacs process.")
 
 (declare-function chromel--native-is-settings-url "chromel-module" (url))
+(declare-function chromel--native-api-version "chromel-module" ())
+
+(defconst chromel-module-api-version 1
+  "API version this file expects from `chromel-native-module'.
+Bump together with `chromel::kChromelApiVersion' whenever a
+`chromel--native-*' signature or meaning changes.")
 
 (defun chromel--ensure-module ()
   "Load the dynamic module without starting CEF.
@@ -599,8 +605,19 @@ build is not misreported as a bad URL.  Always returns non-nil."
       (error
        (user-error "Cannot load the Chromel native module %s: %s"
                    chromel-native-module (error-message-string err))))
-    (setq chromel--module-loaded t))
+    (setq chromel--module-loaded t)
+    (chromel--check-module-api))
   t)
+
+(defun chromel--check-module-api ()
+  "Refuse to run against a dylib built for a different API version.
+`module-load' keeps whatever library it already loaded, so a stale build
+otherwise fails later as a puzzling void-function or arity error."
+  (let ((module (and (fboundp 'chromel--native-api-version)
+                     (chromel--native-api-version))))
+    (unless (eql module chromel-module-api-version)
+      (user-error "Chromel module API %s does not match elisp %s; run ./scripts/build.sh"
+                  module chromel-module-api-version))))
 
 (defun chromel--settings-url-p (url)
   "Return non-nil if URL needs the shared Chrome-style management window.

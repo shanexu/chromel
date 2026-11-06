@@ -445,3 +445,18 @@
       (setq chromel--idle-since (time-subtract (current-time) 3))
       (chromel--tick)
       (should-not (timerp chromel--timer)))))
+
+(ert-deftest chromel-module-api-matches-elisp ()
+  "The built dylib must report the API this file was written against."
+  (skip-unless (file-exists-p chromel-native-module))
+  (chromel--ensure-module)
+  (should (eql (chromel--native-api-version) chromel-module-api-version)))
+
+(ert-deftest chromel-module-api-mismatch-is-loud ()
+  "A module without the accessor, or with another number, must not run."
+  (skip-unless (file-exists-p chromel-native-module))
+  (chromel--ensure-module)
+  (cl-letf (((symbol-function 'chromel--native-api-version) nil))
+    (should-error (chromel--check-module-api) :type 'user-error))
+  (cl-letf (((symbol-function 'chromel--native-api-version) (lambda () 99)))
+    (should-error (chromel--check-module-api) :type 'user-error)))

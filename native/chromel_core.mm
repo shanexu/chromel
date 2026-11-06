@@ -755,6 +755,8 @@ long bind_window(const std::string& title) {
   throw std::runtime_error("Cannot identify the Emacs NSWindow by its temporary title");
 }
 
+int api_version() { return kChromelApiVersion; }
+
 bool is_settings_url(const std::string& url) { return isSettingsURL(url); }
 
 int create(long handle, const std::string& url) {
