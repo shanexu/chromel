@@ -34,6 +34,8 @@ python3 scripts/install-app.py /Applications/Emacs.app
 
 安装脚本将浏览器运行组件放入 Emacs.app，并将原应用完整备份到应用所在目录的 `.emacs-chromel-backups/` 下，输出备份路径。个人配置和浏览器 profile 保持不变。
 
+**为什么必须装进 app bundle**：Chromium 要求 `Chromium Embedded Framework.framework` 与 helper 进程位于"正在运行的宿主 app"内部（helper 定位与沙盒都以此为准），否则 `CefInitialize` 直接失败。所以 `install-app.py` 会把 framework 和 5 个 helper 拷进 `Contents/Frameworks/` 并重新签名。反过来，**插件自己的 `chromel-module.dylib` 不进 app**：它留在仓库的 `build/`，由 `chromel-native-module` 指向。因此日常改代码只需重新构建，不需要重装；只有更换 CEF 版本时才需要重跑安装脚本。
+
 只读预检可在 Emacs 仍运行时执行：
 
 ```sh
@@ -268,6 +270,7 @@ chromel/
 - 点击打开新窗口的链接会转成新 Emacs buffer。第一版不保留 `window.opener` 关系，依赖脚本弹窗通信的登录流程可能不兼容。
 - 页面关闭会强制完成，暂不提供 `beforeunload` 的“未保存内容”确认。
 - CEF helper 保持 Chromium 沙箱开启，没有添加 `--no-sandbox` 或绕过证书校验的参数。
+- `chromel-allow-raw-javascript`（默认 `t`）控制 `javascript` 动作：它把脚本丢给主帧后**不等待结果**，适合"点一下"式的临时操作，但返回值会被丢弃。需要结果时用 `chromel--eval` 那条带 token 的往返通道。设为 `nil` 后相关命令会直接报 `user-error`，适合把浏览视为只读的场景。
 - 目前支持 NS/Cocoa Emacs，不支持终端 Emacs、Linux、GNUstep 或 emacs-mac port。
 
 ## 许可证
