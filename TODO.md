@@ -21,9 +21,9 @@
 **做法**：所有 GUI 脚本统一在开头设固定尺寸（并在退出时还原）。
 **验收**：在两种显示器/缩放设置下结果一致。
 
-### A3 没有 CI
-仓库无 `.github/`。**做法**：macOS runner 上 `build.sh` + ERT + `CHROMEL_TEST_ONLY=smoke,controls` 冒烟（GUI 全套太贵，可 nightly）。
-**验收**：干净 clone 的 PR 能自动跑通构建与 ERT。
+### A3 ✅ CI 工作流已加（首次运行待观察）
+`.github/workflows/ci.yml` 两个作业：`elisp`（Homebrew Emacs + ERT）、`native`（缓存 `.deps`、`build.sh`、拒绝编译警告、校验 `chromel--native-api-version`、带 dylib 再跑 ERT）。GUI 脚本需要显示器，未纳入；后续可加 nightly。
+**现状**：macos-14 在本仓库报 `configuration 'macos-14-arm64-us-default' is not supported`，已改 `macos-13`；运行长时间排队，尚未拿到首个绿灯。
 
 ### A4 ✅ CEF 下载的架构判断
 原先 `platform.machine()` 在 Rosetta 下返回 `x86_64`，会下载 `macosx64` 而让 arm64 Emacs 加载失败。已改为 `host_arch()`：先读 `sysctl -n hw.optional.arm64`，再回退 `platform.machine()` 映射。`python3 scripts/fetch-cef.py --arch` 可直接自检（本机输出 `macosarm64`）。
@@ -84,7 +84,8 @@
 
 - ✅ `docs/architecture.md`：分层、外部消息泵、视图嵌入与坐标系、事件/命令、JS 往返、键盘双路径、焦点、生命周期、不变量、扩展点（README 顶部已链入）。
 - README 明确：CEF 必须在 app bundle 内（`install-app.py` 的理由）、`C-c w E` 与 `s` 的分工、`chromel-allow-raw-javascript` 的取舍、session/history 文件位置与恢复命令。
-- 补 `CHANGELOG.md`，0.1.x 起按"崩溃/安全、交互、测试"三类记录。
+- ✅ `CHANGELOG.md`：0.1.0 起按"崩溃与安全 / 交互 / 测试与构建 / 文档"分类。
+- ✅ README 已补：CEF 为何必须在 app bundle 内、`chromel-allow-raw-javascript` 的取舍。
 
 ## 常用验证
 
