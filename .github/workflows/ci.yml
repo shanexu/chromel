@@ -1,0 +1,53 @@
+name: ci
+
+on:
+  push:
+    branches: [master, ci-setup]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  elisp:
+    name: elisp (ERT, no GUI)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Emacs
+        run: |
+          brew install emacs
+          emacs --version | head -1
+      - name: ERT
+        run: emacs --batch -L . -L test -l test/chromel-test.el -f ert-run-tests-batch-and-exit
+
+  native:
+    name: native (build + module API)
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - name: Emacs with headers
+        run: |
+          brew install emacs
+          include=$(dirname "$(find "$(brew --prefix)" -name emacs-module.h -print -quit)")
+          test -f "$include/emacs-module.h"
+          echo "EMACS_INCLUDE_DIR=$include" >> "$GITHUB_ENV"
+          echo "EMACS=$(command -v emacs)" >> "$GITHUB_ENV"
+      - name: Cache CEF
+        uses: actions/cache@v4
+        with:
+          path: .deps
+          key: cef-${{ hashFiles('cef.lock.json') }}
+      - name: Build
+        run: ./scripts/build.sh
+      - name: No warnings
+        run: |
+          ./scripts/build.sh 2>&1 | tee /tmp/build.log
+          if grep -q "warning:" /tmp/build.log; then
+            echo "compiler warnings are not allowed"; exit 1
+          fi
+      - name: Module answers its API version
+        run: |
+          emacs --batch -L . -l chromel.el \
+            --eval '(module-load "./build/chromel-module.dylib")' \
+            --eval '(unless (eql (chromel--native-api-version) chromel-module-api-version) (kill-emacs 1))'
+      - name: ERT with the built module
+        run: emacs --batch -L . -L test -l test/chromel-test.el -f ert-run-tests-batch-and-exit
