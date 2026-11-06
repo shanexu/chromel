@@ -40,6 +40,13 @@ Do not point this at a Chrome profile.  Restart Emacs after changing it."
   :type 'directory)
 (defcustom chromel-home-url "https://example.org"
   "Page opened by `chromel' when no URL is supplied." :type 'string)
+(defcustom chromel-allow-raw-javascript t
+  "Allow the fire-and-forget JavaScript channel from Lisp.
+The `javascript' browser action runs a script on the main frame and discards
+its result, so nothing can report success or failure.  Set this to nil to
+confine scripting to the tokenized `chromel--eval' path; hint overlays then
+cannot clean themselves up, so re-run `chromel-follow' to clear them."
+  :type 'boolean)
 (defcustom chromel-history-limit 1000 "Maximum number of saved history entries."
   :type 'natnum)
 (defcustom chromel-closed-tab-limit 30
@@ -149,7 +156,7 @@ Held j/k use `chromel-scroll-speed` after the initial step."
       (user-error "Build the module first: cd %s && ./scripts/build.sh" chromel--directory))
     (make-directory chromel-data-directory t)
     (set-file-modes chromel-data-directory #o700)
-    (module-load chromel-native-module)
+    (chromel--ensure-module)
     ;; Chromium's macOS sandbox authorizes MainBundlePath, not CEF's outer
     ;; bundle override.  The launcher supplies an unchanged Emacs binary in
     ;; a private bundle with the framework physically inside it.
@@ -495,12 +502,22 @@ not create a browser tab."
   (interactive)
   (chromel-settings "https://chromewebstore.google.com/"))
 
+(defvar chromel--module-loaded nil
+  "Non-nil once the dynamic module is present in this Emacs process.")
+
+(defun chromel--ensure-module ()
+  "Load the dynamic module without starting CEF."
+  (unless chromel--module-loaded
+    (module-load chromel-native-module)
+    (setq chromel--module-loaded t)))
+
 (defun chromel--settings-url-p (url)
-  "Return non-nil if URL needs the shared Chrome-style management window."
+  "Return non-nil if URL needs the shared Chrome-style management window.
+The matching rules live in the native layer, so Lisp and CEF cannot drift apart."
   (and (stringp url)
-       (let ((case-fold-search t))
-         (or (string-match-p "\\`https://chromewebstore\\.google\\.com\\(?:[/?#]\\|\\'\\)" url)
-             (string-match-p "\\`chrome://\\(?:settings\\|password-manager\\|extensions\\)\\(?:[/?#]\\|\\'\\)" url)))))
+       (ignore-errors (chromel--ensure-module) t)
+       (fboundp 'chromel--native-is-settings-url)
+       (chromel--native-is-settings-url url)))
 
 ;;;###autoload
 (defun chromel (&optional url background)
@@ -532,6 +549,8 @@ Management and Chrome Web Store URLs open a separate window and return nil."
 (defun chromel--command (action &optional argument)
   (chromel--ensure-browser)
   (unless chromel--id (user-error "This is not a live Chromel buffer"))
+  (when (and (equal action "javascript") (not chromel-allow-raw-javascript))
+    (user-error "Raw JavaScript is disabled; see `chromel-allow-raw-javascript'"))
   (chromel--native-command chromel--id action (or argument "")))
 
 (defun chromel-open-url (url)
