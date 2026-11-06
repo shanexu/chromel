@@ -102,7 +102,16 @@
   (should (equal (chromel--normalize-url "https://example.org/a?q=x") "https://example.org/a?q=x"))
   (should (equal (chromel--normalize-url "about:blank") "about:blank"))
   (should (equal (chromel--normalize-url "data:text/html,hello") "data:text/html,hello"))
-  (should (string-prefix-p "https://duckduckgo.com/?q=" (chromel--normalize-url "emacs browser"))))
+  (should (equal (chromel--normalize-url "emacs browser")
+                 "https://duckduckgo.com/?q=emacs%20browser"))
+  (should (equal (chromel--normalize-url "100% coverage")
+                 "https://duckduckgo.com/?q=100%25%20coverage")))
+
+(ert-deftest chromel-search-url-is-customizable ()
+  "The search entry point must follow `chromel-search-url'."
+  (let ((chromel-search-url "https://search.example.org/f?q=%s"))
+    (should (equal (chromel--normalize-url "emacs cef")
+                   "https://search.example.org/f?q=emacs%20cef"))))
 
 (ert-deftest chromel-history-roundtrip-dedup-and-limit ()
   (let ((chromel-data-directory (make-temp-file "chromel-history-" t))

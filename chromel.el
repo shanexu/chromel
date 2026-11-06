@@ -40,6 +40,14 @@ Do not point this at a Chrome profile.  Restart Emacs after changing it."
   :type 'directory)
 (defcustom chromel-home-url "https://example.org"
   "Page opened by `chromel' when no URL is supplied." :type 'string)
+(defcustom chromel-search-url "https://duckduckgo.com/?q=%s"
+  "URL template for input that is not navigable.
+%s is replaced by the percent-encoded query, so the template must contain
+exactly one %s.  Examples:
+  https://duckduckgo.com/?q=%s
+  https://www.google.com/search?q=%s
+  https://search.example.org/find?query=%s"
+  :type '(string :tag "URL template containing %s"))
 (defcustom chromel-allow-raw-javascript t
   "Allow the fire-and-forget JavaScript channel from Lisp.
 The `javascript' browser action runs a script on the main frame and discards
@@ -142,7 +150,7 @@ never reset: the native side owns the window's lifetime.")
         ((file-name-absolute-p input)
          (concat "file://" (url-encode-url (expand-file-name input))))
         ((string-match-p "[[:space:]]" input)
-         (concat "https://duckduckgo.com/?q=" (url-hexify-string input)))
+         (format chromel-search-url (url-hexify-string input)))
         ((string-match-p "\\`\\(?:localhost\\|127\\.0\\.0\\.1\\|\\[::1\\]\\)\\(?::[0-9]+\\)?\\(?:/\\|\\'\\)" input)
          (concat "http://" input))
         (t (concat "https://" input))))
