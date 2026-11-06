@@ -375,9 +375,10 @@ class Client final : public CefClient,
     // relies on it); privileged chrome:// pages additionally require a user
     // gesture, so a scripted redirect cannot raise a WebUI host by itself.
     const auto target = request ? request->GetURL().ToString() : std::string();
-    if (id_ > 0 && frame && frame->IsMain() && isSettingsURL(target) &&
-        (userGesture || !isPrivilegedChromeURL(target))) {
-      emit(id_, @"chrome-ui", ns(target));
+    if (id_ > 0 && frame && frame->IsMain() && isSettingsURL(target)) {
+      if (userGesture || !isPrivilegedChromeURL(target)) emit(id_, @"chrome-ui", ns(target));
+      // Cancel either way.  A denied handoff must not fall back to loading the
+      // page in the Alloy browser, which has no chrome:// bindings.
       return true;
     }
     return false;
@@ -724,6 +725,10 @@ void initialize(const std::string& bundle, const std::string& profile) {
   }
   if (!success) {
     stopped = true;
+    // Nothing runs shutdown() after a failed start, so drain the observers
+    // here instead of leaving them attached to a dead runtime.
+    for (id token : observers) [NSNotificationCenter.defaultCenter removeObserver:token];
+    observers.clear();
     throw std::runtime_error("CEF initialization failed; inspect the profile cef.log and restart Emacs");
   }
   profilePath = canonicalProfile;
@@ -773,7 +778,12 @@ int create(long handle, const std::string& url) {
   // CEF owns its view; the clipping container belongs to this plugin.
   NSView* view = (__bridge NSView*)page->browser->GetHost()->GetWindowHandle();
   if (!view) {
+    // OnAfterCreated already registered this browser; without closing it the
+    // renderer outlives the session and shutdown() can never reach CefShutdown.
+    browsers.erase(page->browser->GetIdentifier());
+    page->browser->GetHost()->CloseBrowser(true);
     [page->container removeFromSuperview];
+    page->lifetimeWindow = nil;
     pages.erase(page->id);
     throw std::runtime_error("CEF created a browser without a Cocoa view");
   }
@@ -787,7 +797,6 @@ int create(long handle, const std::string& url) {
 void layout(int id, long handle, double x, double y, double width, double height) {
   requireReady();
   auto page = pageFor(id);
-  if (!page->browser) throw std::runtime_error("Browser is gone");
   NSView* host = windowFor(handle).contentView;
   if (page->host != host) {
     unfocus(page);
@@ -1084,7 +1093,7 @@ std::string inspect(int id) {
   NSRect rect = page->container.frame;
   NSView* host = page->host;
   double top = host.isFlipped ? rect.origin.y : NSHeight(host.bounds) - NSMaxY(rect);
-  auto focusedFrame = page->browser ? page->browser->GetFocusedFrame() : nullptr;
+  auto focusedFrame = page->browser->GetFocusedFrame();
   NSDictionary* state = @{@"x": @(rect.origin.x), @"y": @(top),
     @"width": @(rect.size.width), @"height": @(rect.size.height),
     @"window": @(page->container.window.windowNumber),

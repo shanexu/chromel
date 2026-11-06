@@ -2,6 +2,8 @@
 #import <Foundation/Foundation.h>
 #include <emacs-module.h>
 #include "chromel_core.h"
+#include <cstdio>
+#include <cstring>
 #include <exception>
 #include <string>
 #include <vector>
@@ -18,9 +20,12 @@ std::string stringArg(emacs_env* env, emacs_value arg) {
 emacs_value result(emacs_env* env, const std::string& value) {
   return env->make_string(env, value.data(), value.size());
 }
-// Report a native failure as a Lisp error so callers can recover.
-emacs_value signal_(emacs_env* env, const std::string& text) {
-  emacs_value message = result(env, text);
+// Report a native failure as a Lisp error so callers can recover.  Takes a
+// plain C string: this runs inside a noexcept function while unwinding, where
+// allocating a std::string could itself throw and terminate the process.
+emacs_value signalText(emacs_env* env, const char* text) {
+  const char* safe = text ? text : "";
+  emacs_value message = env->make_string(env, safe, static_cast<ptrdiff_t>(strlen(safe)));
   emacs_value list = env->funcall(env, env->intern(env, "list"), 1, &message);
   env->non_local_exit_signal(env, env->intern(env, "error"), list);
   return env->intern(env, "nil");
@@ -60,19 +65,18 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
     }
     return env->intern(env, "t");
   } catch (const std::exception& error) {
-    return signal_(env, error.what());
+    return signalText(env, error.what());
   } catch (NSException* exception) {
     // Cocoa faults (nil subviews, abandoned windows) must not unwind through
     // Objective-C into Emacs' C frames, which aborts the whole editor.
-    std::string text = "Objective-C exception";
-    @try {
-      text += ": " + std::string((exception.name ?: @"NSException").UTF8String ?: "") +
-              " " + std::string(exception.reason.UTF8String ?: "");
-    } @catch (...) {
-    }
-    return signal_(env, text);
+    const char* name = exception.name.UTF8String;
+    const char* reason = exception.reason.UTF8String;
+    char text[512];
+    snprintf(text, sizeof text, "Objective-C exception: %s %s",
+             name ? name : "NSException", reason ? reason : "");
+    return signalText(env, text);
   } catch (...) {
-    return signal_(env, "Native module failure");
+    return signalText(env, "Native module failure");
   }
  }
 }

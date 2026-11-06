@@ -505,18 +505,26 @@ not create a browser tab."
 (defvar chromel--module-loaded nil
   "Non-nil once the dynamic module is present in this Emacs process.")
 
+(declare-function chromel--native-is-settings-url "chromel-module" (url))
+
 (defun chromel--ensure-module ()
-  "Load the dynamic module without starting CEF."
+  "Load the dynamic module without starting CEF.
+Signal `user-error' naming the library when it cannot be loaded, so a stale
+build is not misreported as a bad URL.  Always returns non-nil."
   (unless chromel--module-loaded
-    (module-load chromel-native-module)
-    (setq chromel--module-loaded t)))
+    (condition-case err
+        (module-load chromel-native-module)
+      (error
+       (user-error "Cannot load the Chromel native module %s: %s"
+                   chromel-native-module (error-message-string err))))
+    (setq chromel--module-loaded t))
+  t)
 
 (defun chromel--settings-url-p (url)
   "Return non-nil if URL needs the shared Chrome-style management window.
 The matching rules live in the native layer, so Lisp and CEF cannot drift apart."
   (and (stringp url)
-       (ignore-errors (chromel--ensure-module) t)
-       (fboundp 'chromel--native-is-settings-url)
+       (chromel--ensure-module)
        (chromel--native-is-settings-url url)))
 
 ;;;###autoload
@@ -547,10 +555,12 @@ Management and Chrome Web Store URLs open a separate window and return nil."
       buffer)))
 
 (defun chromel--command (action &optional argument)
-  (chromel--ensure-browser)
-  (unless chromel--id (user-error "This is not a live Chromel buffer"))
+  ;; Check the option before ensure-browser: that call can start CEF and create
+  ;; a deferred tab, and a refused action should not have those side effects.
   (when (and (equal action "javascript") (not chromel-allow-raw-javascript))
     (user-error "Raw JavaScript is disabled; see `chromel-allow-raw-javascript'"))
+  (chromel--ensure-browser)
+  (unless chromel--id (user-error "This is not a live Chromel buffer"))
   (chromel--native-command chromel--id action (or argument "")))
 
 (defun chromel-open-url (url)

@@ -350,7 +350,10 @@
       (should-error (chromel-open-copied-url) :type 'user-error))))
 
 (ert-deftest chromel-settings-routes-without-creating-or-selecting-a-tab ()
+  ;; Load first: module-load refs every chromel--native-* binding, which would
+  ;; replace the stubs installed by cl-letf below.
   (let (calls)
+    (chromel--ensure-module)
     (cl-letf (((symbol-function 'chromel--start) #'ignore)
               ((symbol-function 'chromel--native-command) (lambda (&rest args) (push args calls)))
               ((symbol-function 'chromel--make-tab) (lambda (&rest _) (error "Unexpected tab")))
@@ -390,6 +393,7 @@
   (let ((chromel--pages (make-hash-table)) calls)
     (with-temp-buffer
       (puthash 7 (current-buffer) chromel--pages)
+      (chromel--ensure-module) ; see the note in the routing test above
       (cl-letf (((symbol-function 'chromel--start) #'ignore)
                 ((symbol-function 'chromel--native-command) (lambda (&rest args) (push args calls)))
                 ((symbol-function 'chromel--command) (lambda (&rest _) (error "Unexpected source command")))

@@ -79,24 +79,31 @@ threading.Thread(target=server.serve_forever, daemon=True).start()
 url = f"http://127.0.0.1:{server.server_port}/fixture"
 try:
     with tempfile.TemporaryDirectory(prefix="emacs-chromel-smoke-") as temp:
-        for expected, script in [("chromel-emacs-ready", "gui-smoke.el"),
-                                 ("chromel-emacs-restored", "gui-smoke.el"),
-                                 ("chromel-emacs-restored", "gui-hints.el"),
-                                 ("controls-ready", "gui-controls.el"),
-                                 ("scroll-ready", "gui-scroll.el"),
-                                 ("scroll-ready", "gui-hold.el"),
-                                 ("scroll-modal-ready", "gui-scroll-modal.el"),
-                                 ("chromel-emacs-restored", "gui-escape.el"),
-                                 ("features-ready", "gui-features.el"),
-                                 ("chromel-emacs-restored", "gui-keymap.el"),
-                                 ("chromel-emacs-restored", "gui-pump.el"),
-                                 ("session-seed", "gui-session.el"),
-                                 ("session-restore", "gui-session.el"),
-                                 ("settings-seed", "gui-settings.el"),
-                                 ("settings-restore", "gui-settings.el"),
-                                 ("password-seed", "gui-passwords.el"),
-                                 ("password-restore", "gui-passwords.el"),
-                                 ("management", "gui-management.el")]:
+        # CHROMEL_TEST_ONLY=narrows the run to matching script/title substrings.
+        tests = [
+            ("chromel-emacs-ready", "gui-smoke.el"),
+            ("chromel-emacs-restored", "gui-smoke.el"),
+            ("chromel-emacs-restored", "gui-hints.el"),
+            ("controls-ready", "gui-controls.el"),
+            ("scroll-ready", "gui-scroll.el"),
+            ("scroll-ready", "gui-hold.el"),
+            ("scroll-modal-ready", "gui-scroll-modal.el"),
+            ("chromel-emacs-restored", "gui-escape.el"),
+            ("features-ready", "gui-features.el"),
+            ("chromel-emacs-restored", "gui-keymap.el"),
+            ("chromel-emacs-restored", "gui-pump.el"),
+            ("session-seed", "gui-session.el"),
+            ("session-restore", "gui-session.el"),
+            ("settings-seed", "gui-settings.el"),
+            ("settings-restore", "gui-settings.el"),
+            ("password-seed", "gui-passwords.el"),
+            ("password-restore", "gui-passwords.el"),
+            ("management", "gui-management.el"),
+        ]
+        only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
+        if only:
+            tests = [t for t in tests if any(part in t[1] or part in t[0] for part in only)]
+        for expected, script in tests:
             route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
                      'gui-scroll-modal.el': '/scroll-modal'}.get(script, '/fixture')
             test_url = url.replace('/fixture', route)
