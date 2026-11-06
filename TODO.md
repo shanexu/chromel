@@ -12,10 +12,9 @@
 
 ## A. 工程护栏（建议优先）
 
-### A1 测试可能跑旧 dylib
-`scripts/test-gui.py:14-15` 只构建 `chromel-pump-probe`，模块编译失败时套件仍会用上一次的 `build/chromel-module.dylib` 跑完并"通过"（本轮实际撞到过）。
-**做法**：构建 `chromel-module` 并校验返回码；必要时断言 dylib mtime 晚于 `native/*.mm|h`。
-**验收**：故意在 native 代码里写错，套件必须立刻失败而不是变绿。
+### A1 ✅ 测试可能跑旧 dylib（已修，`scripts/test-gui.py:16-27`）
+原先只构建 `chromel-pump-probe`，模块编译失败时套件仍用上一次的 `build/chromel-module.dylib` 跑完并"通过"（本轮实际撞到过）。现在同时构建 `chromel-module`，失败即 `SystemExit`，并断言 dylib 存在。
+**已验证**：故意 `#error` → 3 秒退出、rc=1、零个 Emacs 进程启动；恢复后 `CHROMEL_TEST_ONLY=smoke` 全 PASS。
 
 ### A2 GUI 脚本依赖环境窗口尺寸
 默认 frame 约 560×462 点，`gui-hints`/`gui-features` 的可见元素与坐标都隐含这个尺寸；`gui-controls.el:168`、`gui-hold.el:158`、`gui-scroll-modal.el:122` 已显式 `(set-frame-size nil 1100 750 t)`。

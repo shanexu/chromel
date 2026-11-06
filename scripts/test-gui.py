@@ -10,9 +10,21 @@ import tempfile
 import threading
 
 root = pathlib.Path(__file__).resolve().parent.parent
-# Test-only observer for NSApp.run reentry, never loaded by the browser itself.
-subprocess.run(["cmake", "-S", str(root), "-B", str(root / "build")], check=True)
-subprocess.run(["cmake", "--build", str(root / "build"), "--target", "chromel-pump-probe"], check=True)
+build = root / "build"
+module = build / "chromel-module.dylib"
+subprocess.run(["cmake", "-S", str(root), "-B", str(build)], check=True)
+# Build everything the GUI processes load, not just the probe: a failed compile
+# used to leave the previous dylib in place, and the suite then reported PASS
+# while testing stale native code.
+try:
+    subprocess.run(
+        ["cmake", "--build", str(build), "--target", "chromel-module", "chromel-pump-probe"],
+        check=True)
+except subprocess.CalledProcessError:
+    raise SystemExit(
+        "FAIL: native build failed; refusing to test a stale chromel-module.dylib")
+if not module.is_file():
+    raise SystemExit(f"FAIL: {module} is missing after a successful build")
 host = subprocess.check_output(["python3", str(root / "scripts/prepare-host.py")], text=True).strip()
 emacs = str(pathlib.Path(host) / "Contents/MacOS/Emacs")
 
