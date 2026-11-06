@@ -3,6 +3,16 @@ project(emacs_chromel LANGUAGES C CXX OBJCXX)
 if(NOT APPLE)
   message(FATAL_ERROR "This native backend currently supports macOS only")
 endif()
+# Keep our objects at the documented floor; without this the linker inherits the
+# running host's version and warns when the CEF slices were built for an older one.
+if(NOT CMAKE_OSX_DEPLOYMENT_TARGET)
+  set(CMAKE_OSX_DEPLOYMENT_TARGET "13.0" CACHE STRING "Minimum macOS version" FORCE)
+endif()
+# An unset build type means no optimisation flags at all, which also disables
+# -DNDEBUG and leaves CEF assertions live in release builds.
+if(NOT CMAKE_CONFIGURATION_TYPES AND NOT CMAKE_BUILD_TYPE)
+  set(CMAKE_BUILD_TYPE Release CACHE STRING "Build type" FORCE)
+endif()
 set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_OBJCXX_STANDARD 20)
 set(CMAKE_POSITION_INDEPENDENT_CODE ON)
