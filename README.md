@@ -124,7 +124,7 @@ EMACS_INCLUDE_DIR=/path/to/emacs/include ./scripts/build.sh
 | `C-c w ,` / `M-x chromel-settings` | 打开或切回独立的 Chromium 设置窗口 |
 | `C-c w P` / `M-x chromel-passwords` | 打开 Chromium 密码管理页 |
 | `C-c w e` / `M-x chromel-extensions` | 管理扩展：启停、权限、选项和卸载 |
-| `C-c w s` / `M-x chromel-extension-store` | 打开 Chrome Web Store 安装扩展 |
+| `C-c w E` / `M-x chromel-extension-store` | 打开 Chrome Web Store 安装扩展 |
 
 页面切换包含已加载网页和等待加载的会话标签；`gt` / `gT` 的顺序不随最近访问顺序改变。`t`、`O` 和切换页面命令在当前 Emacs 窗口显示目标页面并保留命令焦点。`o` / `O` 使用 Emacs minibuffer 和历史 URL 补全，尚未实现 Vimium 的书签混合搜索。`p` / `P` 与 Emacs 的 yank 一样，通过 `current-kill` 遵循个人剪贴板设置。
 
@@ -172,7 +172,7 @@ Chromium 的启动页、搜索引擎等选项不会替代 `chromel-home-url`、E
 
 ## 扩展管理与 Chrome Web Store
 
-1. 执行 `M-x chromel-extension-store`（网页 buffer 中为 `C-c w s`）。
+1. 执行 `M-x chromel-extension-store`（网页 buffer 中为 `C-c w E`）。
 2. 在官方商店找到扩展，点击 **Add to Chrome**，阅读权限提示后确认安装。
 3. 返回 Emacs，重新加载需要使用扩展的页面。
 4. 执行 `M-x chromel-extensions`（`C-c w e`）管理已安装扩展：启用/禁用、网站权限、扩展选项、快捷键和卸载。

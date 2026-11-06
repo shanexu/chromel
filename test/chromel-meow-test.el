@@ -25,7 +25,7 @@
                     ("ge" . chromel-open-url) ("gE" . chromel-edit-url-new-buffer)
                     ("t" . chromel-new-tab) ("x" . chromel-close-tab) ("X" . chromel-reopen-closed-tab)
                     ("C-c w ," . chromel-settings) ("C-c w P" . chromel-passwords)
-                    ("C-c w e" . chromel-extensions) ("C-c w s" . chromel-extension-store) ("C-c w S" . chromel-save-session) ("C-c w R" . chromel-restore-session)
+                    ("C-c w e" . chromel-extensions) ("C-c w E" . chromel-extension-store) ("C-c w s" . chromel-find) ("C-c w S" . chromel-save-session) ("C-c w R" . chromel-restore-session)
                     ("J" . chromel-previous-tab) ("K" . chromel-next-tab)
                     ("gT" . chromel-previous-tab) ("gt" . chromel-next-tab)
                     ("T" . chromel-switch-tab) ("^" . chromel-last-tab)

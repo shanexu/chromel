@@ -106,6 +106,15 @@ Held j/k use `chromel-scroll-speed` after the initial step."
 (defvar chromel--session-inhibit nil)
 (defvar chromel--shutting-down nil)
 (defvar chromel--eval-counter 0)
+(defvar chromel--idle-since nil
+  "Start of the grace period before the pump is allowed to stop.
+CEF closes browsers asynchronously, so `chromel--pages' empties before the
+native side has finished tearing them down; pumping must continue until then.")
+(defvar chromel--settings-open nil
+  "Non-nil once a Chromium settings window was opened in this session.
+Settings pages are CEF browsers that are not tracked in `chromel--pages', so
+the pump has to keep running while one may still be alive.  It is deliberately
+never reset: the native side owns the window's lifetime.")
 (defvar-local chromel--id nil)
 (defvar-local chromel--pending nil)
 (defvar-local chromel--activation-error nil)
@@ -113,6 +122,8 @@ Held j/k use `chromel-scroll-speed` after the initial step."
 (defvar-local chromel--title "Browser")
 (defvar-local chromel--status "")
 (defvar-local chromel--window nil)
+(defvar-local chromel--sent-selected nil)
+(defvar-local chromel--sent-geometry nil)
 (defvar-local chromel--find-token nil)
 (defvar-local chromel--find-reply nil)
 (defvar-local chromel--find-text "")
@@ -175,7 +186,7 @@ Held j/k use `chromel-scroll-speed` after the initial step."
     (add-hook 'minibuffer-setup-hook #'chromel--release-focus)
     (add-hook 'delete-frame-functions #'chromel--frame-deleting)
     (add-hook 'kill-emacs-hook #'chromel--shutdown)
-    (setq chromel--timer (run-at-time 0 0.02 #'chromel--tick))))
+    (chromel--ensure-timer)))
 
 (defun chromel--frame-handle (frame)
   "Bind FRAME to an NSWindow without depending on private Emacs structs."
@@ -219,33 +230,47 @@ Held j/k use `chromel-scroll-speed` after the initial step."
        (lambda (id buffer)
          (when (buffer-live-p buffer)
            (with-current-buffer buffer
-             (let ((win (chromel--display-window buffer)))
+             (let* ((win (chromel--display-window buffer))
+                    (active (and win (eq win (selected-window))
+                                 (not (active-minibuffer-window)))))
                (setq chromel--window win)
                (let ((settings (list chromel-scroll-step chromel-scroll-duration chromel-scroll-speed)))
                  (unless (equal settings chromel--scroll-settings)
                    (chromel--native-command id "scroll-settings" (chromel--json (vconcat settings)))
                    (setq chromel--scroll-settings settings)))
                ;; Cocoa may consume Escape before Emacs keymaps see it.  Tell
-               ;; the native event router which buffer owns command input.
-               (chromel--native-command id "selected"
-                                    (if (and (eq win (selected-window))
-                                             (not (active-minibuffer-window))) "1" "0"))
+               ;; the native event router which buffer owns command input, but
+               ;; only on transitions: this runs 50 times per second.
+               (let ((selected (if active "1" "0")))
+                 (unless (equal selected chromel--sent-selected)
+                   (setq chromel--sent-selected selected)
+                   (chromel--native-command id "selected" selected)))
                (if (and win (eq t (frame-visible-p (window-frame win))))
                    (pcase-let ((`(,left ,top ,right ,bottom)
                                 (window-inside-pixel-edges win)))
-                     (chromel--native-layout id (chromel--frame-handle (window-frame win))
-                                         left top (- right left) (- bottom top))
-                     (unless (and (eq win (selected-window))
-                                  (not (active-minibuffer-window)))
+                     (let ((geometry (list (chromel--frame-handle (window-frame win))
+                                           left top (- right left) (- bottom top))))
+                       (unless (equal geometry chromel--sent-geometry)
+                         (setq chromel--sent-geometry geometry)
+                         (chromel--native-layout id (nth 0 geometry) (nth 1 geometry)
+                                             (nth 2 geometry) (nth 3 geometry)
+                                             (nth 4 geometry))))
+                     (unless active
                        (chromel--native-command id "unfocus" "")))
-                 (chromel--native-hide id))))))
+                 (unless (eq 'hidden chromel--sent-geometry)
+                   (setq chromel--sent-geometry 'hidden
+                         chromel--sent-selected nil)
+                   (chromel--native-hide id)))))))
        chromel--pages))))
 
 (defun chromel--release-focus ()
   (when chromel--initialized
-    (maphash (lambda (id _)
+    (maphash (lambda (id buffer)
                (chromel--native-command id "selected" "0")
-               (chromel--native-command id "unfocus" "")) chromel--pages)))
+               (chromel--native-command id "unfocus" "")
+               (when (buffer-live-p buffer)
+                 (with-current-buffer buffer (setq chromel--sent-selected "0"))))
+             chromel--pages)))
 
 (defun chromel--frame-deleting (frame)
   (maphash
@@ -308,6 +333,23 @@ Held j/k use `chromel-scroll-speed` after the initial step."
         (when (member type '("title" "url")) (chromel--session-changed))
         (force-mode-line-update)))))
 
+(defun chromel--pump-needed-p ()
+  "Return non-nil when CEF or a deferred tab still needs a sync pass."
+  (or (> (hash-table-count chromel--pages) 0)
+      chromel--settings-open
+      ;; A deferred tab materializes during `chromel--sync', which the pump
+      ;; drives: without the timer it would wait forever for a keypress.
+      (cl-some (lambda (buffer)
+                 (and (buffer-live-p buffer)
+                      (buffer-local-value 'chromel--pending buffer)))
+               (chromel--buffers))))
+
+(defun chromel--ensure-timer ()
+  "Start the 20 ms CEF pump when there is something to pump."
+  (when (and chromel--initialized (not chromel--shutting-down)
+             (not (timerp chromel--timer)) (chromel--pump-needed-p))
+    (setq chromel--timer (run-at-time 0 0.02 #'chromel--tick))))
+
 (defun chromel--tick ()
   (when chromel--initialized
     (condition-case err
@@ -316,18 +358,29 @@ Held j/k use `chromel-scroll-speed` after the initial step."
           (dolist (event (json-parse-string (chromel--native-events)
                                             :object-type 'plist :array-type 'list))
             (chromel--handle-event event))
-          (chromel--sync))
+          (chromel--sync)
+          (if (chromel--pump-needed-p)
+              (setq chromel--idle-since nil)
+            ;; Everything is gone or closing: keep pumping briefly so CEF can
+            ;; finish tearing browsers down, then stop paying for a 20 ms timer.
+            (if (and chromel--idle-since
+                     (> (float-time (time-since chromel--idle-since)) 2.0))
+                (progn
+                  (when (timerp chromel--timer) (cancel-timer chromel--timer))
+                  (setq chromel--timer nil chromel--idle-since nil))
+              (unless chromel--idle-since
+                (setq chromel--idle-since (current-time))))))
       (error
        ;; Avoid repeated native errors at 50 Hz.  `chromel-resume' retries explicitly.
        (cancel-timer chromel--timer)
-       (setq chromel--timer nil)
+       (setq chromel--timer nil chromel--idle-since nil)
        (message "Chromel paused: %s (M-x chromel-resume to retry)" (error-message-string err))))))
 
 (defun chromel-resume ()
   "Resume the browser event pump after a reported error."
   (interactive)
   (unless chromel--initialized (user-error "Chromel has not started"))
-  (unless chromel--timer (setq chromel--timer (run-at-time 0 0.02 #'chromel--tick))))
+  (unless chromel--timer (chromel--ensure-timer)))
 
 (defun chromel--kill-buffer ()
   (let* ((buffer (current-buffer))
@@ -411,12 +464,26 @@ Held j/k use `chromel-scroll-speed` after the initial step."
 
 ;; These remain accessible when the native page owns keyboard focus.
 (defvar chromel-actions-map (make-sparse-keymap))
-(dolist (entry '(("s" . chromel-find) ("n" . chromel-find-next) ("p" . chromel-find-previous)
-                 ("c" . chromel-find-clear) ("d" . chromel-scroll-half-page-down)
-                 ("u" . chromel-scroll-half-page-up) ("<" . chromel-scroll-to-top)
-                 (">" . chromel-scroll-to-bottom) ("y" . chromel-copy-url)
-                 ("f" . chromel-copy-link) ("m" . chromel-follow-multiple)
-                 ("h" . chromel-history) ("," . chromel-settings) ("P" . chromel-passwords) ("e" . chromel-extensions) ("s" . chromel-extension-store) ("S" . chromel-save-session) ("R" . chromel-restore-session)))
+;; "s" stays page search (the s/n/p/c group, see README "页内搜索"); the Web
+;; Store moved to "E" so the two can no longer shadow each other.
+(dolist (entry '(("s" . chromel-find)
+                 ("n" . chromel-find-next)
+                 ("p" . chromel-find-previous)
+                 ("c" . chromel-find-clear)
+                 ("d" . chromel-scroll-half-page-down)
+                 ("u" . chromel-scroll-half-page-up)
+                 ("<" . chromel-scroll-to-top)
+                 (">" . chromel-scroll-to-bottom)
+                 ("y" . chromel-copy-url)
+                 ("f" . chromel-copy-link)
+                 ("m" . chromel-follow-multiple)
+                 ("h" . chromel-history)
+                 ("," . chromel-settings)
+                 ("P" . chromel-passwords)
+                 ("e" . chromel-extensions)
+                 ("E" . chromel-extension-store)
+                 ("S" . chromel-save-session)
+                 ("R" . chromel-restore-session)))
   (define-key chromel-actions-map (kbd (car entry)) (cdr entry)))
 (define-key chromel-mode-map (kbd "C-c w") chromel-actions-map)
 
@@ -464,8 +531,11 @@ One native view can occupy only one Emacs window at a time."
            (id (chromel--native-create (chromel--frame-handle
                                     (if window (window-frame window) (selected-frame)))
                                   chromel--url)))
-      (setq chromel--id id chromel--pending nil chromel--activation-error nil chromel--status "Loading")
-      (puthash id (current-buffer) chromel--pages))))
+      (setq chromel--id id chromel--pending nil chromel--activation-error nil chromel--status "Loading"
+            chromel--sent-selected nil chromel--sent-geometry nil)
+      (puthash id (current-buffer) chromel--pages)
+      ;; Closing every tab stops the pump; a new tab has to restart it.
+      (chromel--ensure-timer))))
 
 ;;;###autoload
 (defun chromel-settings (&optional url)
@@ -478,6 +548,8 @@ not create a browser tab."
   (when (and url (not (chromel--settings-url-p url)))
     (user-error "Expected a Chromium management or Chrome Web Store URL"))
   (chromel--start)
+  (setq chromel--settings-open t)
+  (chromel--ensure-timer)
   (chromel--native-command 0 "settings"
                        (if url
                            (replace-regexp-in-string
