@@ -9,7 +9,7 @@ on:
 jobs:
   elisp:
     name: elisp (ERT, no GUI)
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
       - name: Emacs
@@ -21,7 +21,7 @@ jobs:
 
   native:
     name: native (build + module API)
-    runs-on: macos-14
+    runs-on: macos-13
     steps:
       - uses: actions/checkout@v4
       - name: Emacs with headers
