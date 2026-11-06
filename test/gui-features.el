@@ -82,7 +82,10 @@
     (chromel-test--until "document.getElementById('panel').scrollTop===0" "Top did not stay in panel")
     (chromel-scroll-to-top)
     (chromel-test--until "scrollY===0" "Top at panel boundary escaped to outer page")
-    (chromel-test--click 550 120 "feature-child")
+    ;; The cross-origin frame sits at x 500..730, but the last 16 CSS px of the
+    ;; 560 px view (500..543 usable) belong to the overlay scrollbar strip and
+    ;; never hit-test into page content, so aim well inside the frame instead.
+    (chromel-test--click 520 120 "feature-child")
     (chromel-scroll-half-page-down)
     (chromel-test--until "childState.y===Math.round(childState.height/2) && scrollY===0" "Half-page did not route to cross-origin iframe")
     (chromel-scroll-to-bottom)
