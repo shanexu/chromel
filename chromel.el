@@ -319,9 +319,11 @@ never reset: the native side owns the window's lifetime.")
           ("chrome-ui" (chromel-settings value))
           ("popup-background" (chromel value t))
           ("popup"
-           ;; Select the new buffer while keeping browser commands available.
-           (when-let* ((target (chromel value)))
-             (with-current-buffer target (chromel--command "unfocus"))))
+           ;; A page-initiated tab replaces this window's buffer, exactly like
+           ;; an Emacs-side new tab; pop-to-buffer would split the frame the
+           ;; browser lives in and leave the page half height.
+           (when-let* ((target (chromel value t)))
+             (chromel--select-buffer target)))
           ("eval"
            (let ((reply (json-parse-string value :object-type 'plist)))
              (when (equal chromel--eval-token (plist-get reply :token))
