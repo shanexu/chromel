@@ -31,6 +31,7 @@
 
 ### 测试与构建
 
+- GUI 测试统一在 `test/gui-frame.el` 固定的 1100×750 frame 里运行，几何断言不再随显示器/字体漂移；hints 测试改为按 URL 挑标签，不再硬编码按键序列。
 - CEF 的 bundle 不再由 Elisp 从 `invocation-directory` 猜：新增 `chromel--native-bundle-path`（`NSBundle.mainBundle.bundlePath`），路径做 `file-truename` 兜底，软链/`open`/GUI 启动都不会再拿错 bundle（模块 API 升到 3）。
 
 
