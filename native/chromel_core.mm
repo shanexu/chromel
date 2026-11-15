@@ -2,6 +2,7 @@
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 #include "chromel_core.h"
+#include "page.h"
 #include "chromel_scripts.h"
 #include "host_wakeup.h"
 #include "include/cef_app.h"
@@ -32,27 +33,6 @@
 #include <pthread.h>
 
 namespace {
-struct Page {
-  int id;
-  NSView* container;
-  __weak NSWindow* lifetimeWindow;
-  __weak NSView* host;
-  CefRefPtr<CefBrowser> browser;
-  bool closing = false;
-  bool selected = false;
-  std::string pendingEval;
-  std::string pendingFind;
-  int completedFind = -1;
-  std::string inputFrame;
-  bool inputControl = false;
-  int scrollStep = 60, scrollDuration = 140, scrollSpeed = 900;
-  unsigned short physicalCode = 0;
-  char physicalKey = 0, scrollKey = 0;
-  std::string scrollFrame;
-  bool scrollHeld = false;
-};
-std::map<int, std::shared_ptr<Page>> pages;
-std::map<int, CefRefPtr<CefBrowser>> browsers;
 // Chrome-style settings windows share the global request context, but never
 // enter the embedded Page map or its view/focus/lifecycle handling.
 CefRefPtr<CefBrowser> settingsBrowser;
@@ -69,7 +49,6 @@ bool initialized = false;
 bool stopped = false;
 bool pumping = false;
 std::unique_ptr<ChromelHostWakeup> hostWakeup;
-int nextId = 1;
 std::string profilePath;
 // Three separate promises that used to share one flag.  Naming them keeps the
 // production paths honest: "we are a test process" is not the same statement as
@@ -148,12 +127,6 @@ void emit(int id, NSString* type, NSString* value = @"") {
   // Every callback used here is delivered on the CEF UI (Cocoa main) thread.
   [queue addObject:@{@"id": @(id), @"type": type, @"value": value ?: @""}];
 }
-std::shared_ptr<Page> pageFor(int id) {
-  auto found = pages.find(id);
-  if (found == pages.end() || found->second->closing)
-    throw std::runtime_error("Browser is closed or unknown");
-  return found->second;
-}
 NSWindow* windowFor(long handle) {
   NSWindow* win = [windows objectForKey:@(handle)];
   if (!win || ![NSApp.windows containsObject:win])
@@ -166,50 +139,6 @@ CefRefPtr<CefFrame> mainFrame(const CefRefPtr<CefBrowser>& browser) {
   if (!browser) return nullptr;
   auto frame = browser->GetMainFrame();
   return frame && frame->IsValid() ? frame : nullptr;
-}
-bool ownsFocus(const std::shared_ptr<Page>& page) {
-  NSResponder* responder = page->container.window.firstResponder;
-  return [responder isKindOfClass:NSView.class] &&
-    [(NSView*)responder isDescendantOf:page->container];
-}
-void stopScroll(const std::shared_ptr<Page>& page, bool cancel = true) {
-  if (page->browser && !page->scrollFrame.empty()) {
-    auto frame = page->browser->GetFrameByIdentifier(page->scrollFrame);
-    if (frame && frame->IsValid()) frame->ExecuteJavaScript(
-      cancel ? "window.__emacsChromelScroller?.cancel();" : "window.__emacsChromelScroller?.release();", "", 1);
-  }
-  page->scrollHeld = false;
-  page->scrollKey = 0;
-  if (cancel) { page->scrollFrame.clear(); page->physicalKey = 0; }
-}
-void scrollPage(const std::shared_ptr<Page>& page, CefRefPtr<CefFrame> frame,
-                double amount, int duration, int speed, const std::string& mode, bool held) {
-  if (!frame || !frame->IsValid() || !amount) return;
-  held = held && mode == "pixels" && page->physicalKey == (amount > 0 ? 'j' : 'k');
-  const auto frameId = frame->GetIdentifier().ToString();
-  if (held && page->scrollHeld && page->scrollFrame == frameId && page->scrollKey == page->physicalKey) {
-    frame->ExecuteJavaScript("window.__emacsChromelScroller?.repeat();", "", 1);
-    return;
-  }
-  if (page->scrollHeld) {
-    const auto key = page->physicalKey;
-    stopScroll(page);
-    page->physicalKey = key;
-  }
-  page->scrollFrame = frameId;
-  page->scrollHeld = held;
-  page->scrollKey = held ? page->physicalKey : 0;
-  const auto prefix = held ? "window.__emacsChromelScroller?.hold(" : "window.__emacsChromelScroller?.scroll(";
-  const auto args = std::to_string(amount) + "," + std::to_string(duration) + "," +
-    (held ? std::to_string(speed) : "\"" + mode + "\"");
-  frame->ExecuteJavaScript(prefix + args + ");", "", 1);
-}
-void unfocus(const std::shared_ptr<Page>& page) {
-  stopScroll(page);
-  if (ownsFocus(page)) {
-    if (page->browser) page->browser->GetHost()->SetFocus(false);
-    [page->container.window makeFirstResponder:page->host];
-  }
 }
 
 BOOL isHandling(id self, SEL) {

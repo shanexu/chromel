@@ -31,6 +31,7 @@
 
 ### 内部结构
 
+- `Page` 与两张 id→对象表（`pages`、`browsers`）连同 5 个 page 助手从 `chromel_core.mm` 搬进 `native/page.h` / `native/page.mm`，宿主层从 1311 行降到 1240 行。表仍是 `extern` 全局，这一刀只切编译单元。
 - `command()` 不再是一条 205 行的 `if/else` 链：动作按名字放进 `browserActions()` / `settingsActions()` 两张表，派发只做一次查找。每个动作的代码与校验逻辑原样搬进自己的条目，行为未变（ERT 35/35、GUI 套件 20/20）。
 
 ### 测试与构建
