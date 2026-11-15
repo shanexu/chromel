@@ -99,15 +99,17 @@ external_message_pump = true;
 ```
 
 ```objc
-// chromel_core.mm：App::OnScheduleMessagePumpWork 故意留空
-void OnScheduleMessagePumpWork(int64_t) override {}
+// chromel_core.mm：CEF 说"还有活"时置位，泵之前清零
+void OnScheduleMessagePumpWork(int64_t delayMs) override { pumpPending = delayMs >= 0; }
 ```
 
-于是消息循环的"心跳"来自 Elisp：
+消息循环的"心跳"仍来自 Elisp，但**频率由 CEF 决定**：
 
 ```elisp
-(setq chromel--timer (run-at-time 0 0.02 #'chromel--tick))   ; 50 Hz
+(chromel--arm-tick (if (chromel--caffeinated-p) 0.02 0.25))   ; 有活 50 Hz，idle 4 Hz
 ```
+
+`pump_pending()` 还替 CEF 补了两类它不会排程的工作：活跃的 JS 滚动动画（渲染进程自己的时钟）与设置窗口。连续 10 次没有活才降频，且降频/升频都不额外补一帧——否则帧会成对到达，页面滚动速度会抖动。
 
 `chromel--tick` 做四件事：`native-pump`（内部就是 `CefDoMessageLoopWork()` 一次）→ 取事件 → 分发事件 → `chromel--sync`（对齐几何/选中状态）。
 

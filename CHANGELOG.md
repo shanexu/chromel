@@ -30,6 +30,7 @@
 - DevTools 窗口改用专用 `DevToolsClient(owner)`：在 DevTools 里点开的链接会按所属页面打开新标签，不再是点了没反应；其余检查器事件仍不回传（没有对应 buffer）。
 
 ### 内部结构
+- 事件泵改成按需变频：CEF 用 `OnScheduleMessagePumpWork` 告诉我们有没有活（20 ms），连续 200 ms 没活就降到 250 ms 只排事件队列。一个 idle 标签页的 CPU 从 11.4% 降到 1.3%。JS 滚动与设置窗口仍强制 20 ms。
 
 - `Page` 与两张 id→对象表（`pages`、`browsers`）连同 5 个 page 助手从 `chromel_core.mm` 搬进 `native/page.h` / `native/page.mm`，宿主层从 1311 行降到 1240 行。表仍是 `extern` 全局，这一刀只切编译单元。
 - `command()` 不再是一条 205 行的 `if/else` 链：动作按名字放进 `browserActions()` / `settingsActions()` 两张表，派发只做一次查找。每个动作的代码与校验逻辑原样搬进自己的条目，行为未变（ERT 35/35、GUI 套件 20/20）。

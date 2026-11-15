@@ -96,6 +96,12 @@ Held j/k use `chromel-scroll-speed` after the initial step."
 
 (defvar chromel--initialized nil)
 (defvar chromel--timer nil)
+(defvar chromel--timer-delay nil
+  "Interval the running pump was armed with, so it is only rebuilt on a rate change.")
+(defvar chromel--quiet-ticks 0
+  "Consecutive pumps CEF had nothing for.  Slowing down needs a run of them:
+flapping between 20 ms and 250 ms re-creates the timer and, with it, an
+immediate extra frame — which shows up as uneven scroll velocity.")
 (defvar chromel--syncing nil)
 (defvar chromel--pages (make-hash-table :test #'eql))
 (defvar chromel--frames (make-hash-table :test #'eq :weakness 'key))
@@ -369,11 +375,35 @@ still needed.  Nil before the module is loaded and while CEF is down."
                       (buffer-local-value 'chromel--pending buffer)))
                (chromel--buffers))))
 
+(defun chromel--caffeinated-p ()
+  "Return non-nil when CEF scheduled work for the message loop.
+
+This is CEF's own answer (`OnScheduleMessagePumpWork'), not a guess: while a
+page animates or loads it stays true and the pump runs at 20 ms; on an idle
+page it is false and we only drain events at 250 ms."
+  (and (fboundp 'chromel--native-pump-pending)
+       (= 1 (chromel--native-pump-pending))))
+
+(defun chromel--arm-tick (&optional delay immediate)
+  "Run the pump every DELAY seconds, restarting the timer only when the rate changes.
+
+The timer repeats.  `chromel--eval' and `chromel--find-run' call `chromel--tick'
+directly while they wait, so a one-shot chain would leave a new timer behind on
+every manual tick and multiply the timer storm."
+  (let ((delay (or delay (if (chromel--caffeinated-p) 0.02 0.25))))
+    (unless (and (timerp chromel--timer) (equal chromel--timer-delay delay))
+      (when (timerp chromel--timer) (cancel-timer chromel--timer))
+      ;; A rate change must not fire an extra frame right away: the renderer
+      ;; paces its animation off these pumps, and a double frame reads as a
+      ;; velocity spike.  Only a cold start is allowed to fire immediately.
+      (setq chromel--timer-delay delay
+            chromel--timer (run-at-time (if immediate 0 delay) delay #'chromel--tick)))))
+
 (defun chromel--ensure-timer ()
-  "Start the 20 ms CEF pump when there is something to pump."
+  "Start the CEF pump when there is something to pump."
   (when (and chromel--initialized (not chromel--shutting-down)
-             (not (timerp chromel--timer)) (chromel--pump-needed-p))
-    (setq chromel--timer (run-at-time 0 0.02 #'chromel--tick))))
+             (chromel--pump-needed-p))
+    (chromel--arm-tick 0 t)))
 
 (defun chromel--tick ()
   (when chromel--initialized
@@ -385,19 +415,28 @@ still needed.  Nil before the module is loaded and while CEF is down."
             (chromel--handle-event event))
           (chromel--sync)
           (if (chromel--pump-needed-p)
-              (setq chromel--idle-since nil)
+              (progn
+                (setq chromel--idle-since nil)
+                (if (chromel--caffeinated-p)
+                    (setq chromel--quiet-ticks 0)
+                  (setq chromel--quiet-ticks (1+ chromel--quiet-ticks)))
+                ;; Ten quiet pumps at 20 ms is 200 ms of real idleness; only
+                ;; then is a 250 ms event-drain rate worth the coarser frames.
+                (chromel--arm-tick (if (> chromel--quiet-ticks 10) 0.25 0.02)))
             ;; Everything is gone or closing: keep pumping briefly so CEF can
-            ;; finish tearing browsers down, then stop paying for a 20 ms timer.
+            ;; finish tearing browsers down, then stop paying for a timer.
             (if (and chromel--idle-since
                      (> (float-time (time-since chromel--idle-since)) 2.0))
                 (progn
                   (when (timerp chromel--timer) (cancel-timer chromel--timer))
-                  (setq chromel--timer nil chromel--idle-since nil))
+                  (setq chromel--timer nil chromel--timer-delay nil
+                        chromel--quiet-ticks 0 chromel--idle-since nil))
               (unless chromel--idle-since
-                (setq chromel--idle-since (current-time))))))
+                (setq chromel--idle-since (current-time)))
+              (chromel--arm-tick 0.25))))
       (error
-       ;; Avoid repeated native errors at 50 Hz.  `chromel-resume' retries explicitly.
-       (cancel-timer chromel--timer)
+       ;; Avoid repeated native errors at the pump rate.  `chromel-resume' retries explicitly.
+       (when (timerp chromel--timer) (cancel-timer chromel--timer))
        (setq chromel--timer nil chromel--idle-since nil)
        (message "Chromel paused: %s (M-x chromel-resume to retry)" (error-message-string err))))))
 
@@ -604,7 +643,7 @@ not create a browser tab."
 (declare-function chromel--native-is-settings-url "chromel-module" (url))
 (declare-function chromel--native-api-version "chromel-module" ())
 
-(defconst chromel-module-api-version 3
+(defconst chromel-module-api-version 4
   "API version this file expects from `chromel-native-module'.
 Bump together with `chromel::kChromelApiVersion' whenever a
 `chromel--native-*' signature or meaning changes.")

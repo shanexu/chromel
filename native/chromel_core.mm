@@ -48,6 +48,10 @@ NSMapTable<NSNumber*, NSWindow*>* windows;
 bool initialized = false;
 bool stopped = false;
 bool pumping = false;
+// Set by CEF (from any thread) when it wants the message loop pumped, cleared
+// before each pump.  It is the difference between "20 ms because a frame is
+// due" and "250 ms because nothing is happening".
+std::atomic<bool> pumpPending{false};
 std::unique_ptr<ChromelHostWakeup> hostWakeup;
 std::string profilePath;
 // Three separate promises that used to share one flag.  Naming them keeps the
@@ -176,11 +180,14 @@ class App final : public CefApp, public CefBrowserProcessHandler {
  public:
   CefRefPtr<CefBrowserProcessHandler> GetBrowserProcessHandler() override { return this; }
   CefRefPtr<CefClient> GetDefaultClient() override;
-  void OnScheduleMessagePumpWork(int64_t /*delayMs*/) override {
-    // Emacs already schedules pump() on its main thread every 20 ms, including
-    // while waiting in the minibuffer.  That recurring timer coalesces requests
-    // and services delayed work too.  This callback can run on ANY thread:
-    // never call Lisp, Cocoa, or CefDoMessageLoopWork synchronously here.
+  void OnScheduleMessagePumpWork(int64_t delayMs) override {
+    // CEF telling us when it wants the loop pumped.  A negative delay means
+    // "nothing scheduled", anything else means "work is due (or due soon)".
+    // This callback can run on ANY thread: only touch the atomic and hand the
+    // pump itself to the main queue, never call Lisp, Cocoa, or CEF here.
+    pumpPending = delayMs >= 0;
+    // The pump itself stays on the elisp timer: pumping from here as well made
+    // frames arrive in pairs and `gui-hold' measured uneven velocity.
   }
   void OnBeforeCommandLineProcessing(const CefString& processType,
                                      CefRefPtr<CefCommandLine> commandLine) override {
@@ -1143,7 +1150,22 @@ void pump() {
   requireReady();
   if (pumping) return;
   FlagGuard guard(pumping);
+  // Clear before pumping: CEF re-arms during the call when another frame is
+  // due, and clearing afterwards would throw that request away.
+  pumpPending = false;
   CefDoMessageLoopWork();
+}
+bool pump_pending() {
+  if (pumpPending.load()) return true;
+  // CEF does not schedule a pump for renderer-driven animation frames: a JS
+  // scroll keeps its own clock inside the renderer.  While one of our scroll
+  // animations is live we ask for the fast rate ourselves, or the page moves in
+  // 250 ms bursts and keeps drifting after the key is released.
+  for (const auto& item : pages)
+    if (!item.second->scrollFrame.empty()) return true;
+  // A settings window is a full Chrome UI with its own animations.
+  if (settingsWindow) return true;
+  return false;
 }
 std::string events() {
   requireReady();
