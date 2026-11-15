@@ -79,7 +79,7 @@
 ### 3.3 `native/chromel_core.mm`（宿主层）
 
 - CEF 初始化（`CefInitialize`）、`NSApplication` 改造、事件泵；
-- 页面本身的结构（`Page`）、`pages`/`browsers` 两张表按 page 操作的助手在 `native/page.h` / `native/page.mm`，宿主层只负责编排；
+- 页面本身的结构（`Page`）、`pages`/`browsers` 两张表、`create`/`layout`/`hide` 与窗口表 `windows`/`windowFor` 都在 `native/page.h` / `native/page.mm`；宿主层只负责 CEF 回调与编排，需要 `CefClient` 时通过 `makePageClient(int)` 工厂拿；
 - 每个 page 的 `CefBrowser`、`NSView` 容器、几何布局；
 - 命令执行 `command()` 与事件收集 `emit()`；
 - 设置窗口（`chrome://settings` 等）与 DevTools；

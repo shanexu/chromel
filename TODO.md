@@ -102,11 +102,17 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 ### B6-old 旧描述（已完成，留档）
 
-### B7 全局状态（进行中：第一刀已落地）
+### B7 全局状态（进行中：两刀已落地）
 21 个全局 defvar、单个 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。
 
-**已做（第一刀）**：`Page` 与两张 id→对象表搬进 `native/page.h` / `native/page.mm`，连同 `pageFor`、`ownsFocus`、`stopScroll`、`scrollPage`、`unfocus` 五个按 page 操作的助手；`chromel_core.mm` 从 1311 行降到 1240 行。容器仍是自由全局（`extern`），因为 `create()` 依赖 `Client`、`layout()` 依赖 `windowFor`，这两处还留在 core —— 先切出编译单元，再谈封装。
-**待做**：`create/layout/hide` 迁进 `page.mm`（需要先把 `Client` 或窗口查找下沉）；`settings*` 6 个全局收进 `SettingsState`；`queue/emit` 与键盘路径各自分文件；最后才是把 `extern` 换成 registry 访问器。
+**已做（第一刀）**：`Page` 与两张 id→对象表搬进 `native/page.h` / `native/page.mm`，连同 `pageFor`、`ownsFocus`、`stopScroll`、`scrollPage`、`unfocus` 五个按 page 操作的助手。
+**已做（第二刀）**：`create` / `layout` / `hide` 与 `windows`、`windowFor` 也搬进 `page.mm`。两个遗留依赖各有解：
+- `create()` 原本直接 `new Client(...)`，而 `Client` 是 core 匿名 namespace 里的私有类型。改成 `page.h` 声明 `CefRefPtr<CefClient> makePageClient(int id);`，由 core 在会话作用域实现 `return new Client(id);` —— `page.mm` 只要一个 `CefClient`，不需要知道实现。
+- `layout()`/`hide()` 需要"主线程 + 已初始化 + 未关停"的检查。core 里原本是匿名 namespace 的 `requireReady()`，现拆出外部链接的 `requireBackendReady()`（`page.h` 声明），core 的 `requireReady()` 变成一行转发，50 多个调用点不动，错误文案与状态读取只有一份。
+
+`chromel_core.mm` 1311 → 1240 → **1186** 行，`page.mm` 58 → **153** 行。
+
+**待做**：`settings*` 六个全局收进 `SettingsState`（约 200 行，下一刀）；`queue/emit` 与键盘路径各自分文件；最后才是把 `extern` 换成 registry 访问器。
 
 ### B8 ❌ 不修（调研结论：没有替代品）
 调研目标：能否用 `(frame-parameter frame 'window-id)` 直接拿 NSWindow number，从而删掉 `chromel--frame-handle` 里"临时改 title → 按 title 找窗口"的借用。
