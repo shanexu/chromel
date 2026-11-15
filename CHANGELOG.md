@@ -17,6 +17,7 @@
 
 ### 交互
 
+- 下载不再被静默丢弃：`:download` 交给原生下载处理器，文件落到 `chromel-download-directory`（默认 `~/Downloads`），重名自动加 ` (1)`，模式行显示百分比，完成后在回显区报告路径。没有下载搁架，也没有"另存为"对话框——Emacs 不做那个 UI。
 - `s` 归还页内搜索，Chrome Web Store 移到 `E`（`C-c w E`）；README 与 Meow 测试同步。
 - 20 ms 定时器按需启停：没有页面时先运行 2 秒宽限期再停，新建页面重新起泵。
 - 泵是否该继续运行改由 native 的 browser 计数回答（`chromel--native-browser-count`），设置窗口关掉后定时器也能真正停下；原先那个"永不重置"的开关已删除。

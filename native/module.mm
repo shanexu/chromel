@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #include <emacs-module.h>
 #include "chromel_core.h"
+#include "downloads.h"
 #include <cstdio>
 #include <cstring>
 #include <exception>
@@ -30,7 +31,7 @@ emacs_value signalText(emacs_env* env, const char* text) {
   env->non_local_exit_signal(env, env->intern(env, "error"), list);
   return env->intern(env, "nil");
 }
-enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending };
+enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory };
 emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexcept {
  @autoreleasepool {
   emacs_value nilValue = env->intern(env, "nil");
@@ -43,7 +44,7 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
     std::string first, second;
     int64_t numbers[6] = {};
     if (op == Init) { first = string(0); second = string(1); }
-    if (op == Bind || op == IsSettingsUrl) first = string(0);
+    if (op == Bind || op == IsSettingsUrl || op == SetDownloadDirectory) first = string(0);
     if (op == Create) { numbers[0] = integer(0); first = string(1); }
     if (op == Layout) for (int i = 0; i < 6; ++i) numbers[i] = integer(i);
     if (op == Hide || op == Command || op == Inspect) numbers[0] = integer(0);
@@ -67,6 +68,7 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
       case ApiVersion: return env->make_integer(env, chromel::kChromelApiVersion);
       case BrowserCount: return env->make_integer(env, chromel::browser_count());
       case PumpPending: return env->make_integer(env, chromel::pump_pending() ? 1 : 0);
+      case SetDownloadDirectory: chromel::set_download_directory(first); break;
     }
     return env->intern(env, "t");
   } catch (const std::exception& error) {
@@ -100,6 +102,7 @@ extern "C" int emacs_module_init(emacs_runtime* runtime) noexcept {
     {"events", 0, Events, "Drain browser events as a JSON array."},
     {"info", 0, Info, "Return native runtime diagnostics."},
     {"hints-script", 0, HintsScript, "Return the embedded hint overlay JavaScript."},
+    {"set-download-directory", 1, SetDownloadDirectory, "Choose where downloads are written."},
     {"bundle-path", 0, BundlePath, "Return the bundle this process runs in."},
     {"pump-pending", 0, PumpPending, "Return 1 when CEF has work scheduled for the message loop."},
     {"inspect", 1, Inspect, "Return actual Cocoa geometry and focus state of browser ID as JSON."},

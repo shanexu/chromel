@@ -4,6 +4,7 @@
 #include "chromel_core.h"
 #include "page.h"
 #include "settings.h"
+#include "downloads.h"
 #include "events.h"
 #include "chromel_scripts.h"
 #include "host_wakeup.h"
@@ -227,6 +228,33 @@ class DevToolsClient final : public CefClient,
   IMPLEMENT_REFCOUNTING(DevToolsClient);
 };
 
+// Downloads belong to the tab that started them, so the handler carries its id.
+class DownloadHandler final : public CefDownloadHandler {
+ public:
+  explicit DownloadHandler(int id) : id_(id) {}
+
+  bool OnBeforeDownload(CefRefPtr<CefBrowser> browser,
+                        CefRefPtr<CefDownloadItem> item,
+                        const CefString& suggestedName,
+                        CefRefPtr<CefBeforeDownloadCallback> callback) override {
+    (void)browser;
+    return chromel::start_download(id_, item, suggestedName, callback);
+  }
+
+  void OnDownloadUpdated(CefRefPtr<CefBrowser> browser,
+                         CefRefPtr<CefDownloadItem> item,
+                         CefRefPtr<CefDownloadItemCallback> callback) override {
+    (void)browser;
+    (void)callback;
+    chromel::download_progress(id_, item);
+  }
+
+ private:
+  int id_;
+
+  IMPLEMENT_REFCOUNTING(DownloadHandler);
+};
+
 class Client final : public CefClient,
                      public CefLifeSpanHandler,
                      public CefDisplayHandler,
@@ -234,7 +262,8 @@ class Client final : public CefClient,
                      public CefFocusHandler,
                      public CefRequestHandler,
                      public CefKeyboardHandler,
-                     public CefFindHandler {
+                     public CefFindHandler,
+                     public CefDownloadHandler {
  public:
   explicit Client(int id) : id_(id) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -244,6 +273,9 @@ class Client final : public CefClient,
   CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
   CefRefPtr<CefKeyboardHandler> GetKeyboardHandler() override { return this; }
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
+  CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
+    return new DownloadHandler(id_);
+  }
   void OnFindResult(CefRefPtr<CefBrowser>, int identifier, int count, const CefRect&,
                     int ordinal, bool finalUpdate) override {
     const auto found = pages.find(id_);

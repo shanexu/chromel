@@ -300,7 +300,15 @@ kill-emacs → chromel--shutdown → native-shutdown
 
 **CEF 在同一个进程里只能初始化一次**，所以 `chromel--start` 用 `chromel--initialized` 守卫，重复调用直接报错而不是尝试重启。跳过 `CefShutdown` 是有意的：宁可泄漏到进程退出，也不要在 Emacs 关闭路径上崩掉。
 
-### 4.13 持久化
+### 4.13 下载
+
+`Client` 同时实现 `CefDownloadHandler`（`native/downloads.mm` 持有状态，core 只做转接）。`OnBeforeDownload` 返回 **bool**：CEF156 的语义是"返回 true 并调用 callback 才继续"，返回 false 会退回默认处理——在 Alloy 风格下默认处理就是取消，所以"什么都没发生"曾经是默认行为。
+
+路径由 native 决定：`set_download_directory` 只记录，`start_download` 才 `create_directories`，因为 Emacs 没有下载搁架可以点"另存为"。重名用 `uniquePath()` 变成 `name (1).ext`；`suggestedFileName()` 取 `std::filesystem::path(...).filename()`，防止页面指定 `../../x` 逃出目录。进度按 `(browserId, percent)` 去重后才 `emit` 一条 `download` 事件，Elisp 只负责模式行与回显区。
+
+两个容易踩的浏览器行为：同一页面第二次由脚本触发的下载会被 Chromium 以"多重自动下载"静默拒绝（需要用户手势，测试里用一次真实点击）；并且**刚完成下载的页面不再执行脚本和导航**，所以测试的第二份下载来自一个新标签页。
+
+### 4.14 持久化
 
 数据目录默认 `~/chromel/`（可用 `chromel-data-directory` 覆盖）：
 
@@ -391,7 +399,7 @@ Emacs.app/Contents/
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape 等；加上原生冒烟共 20 项。
+GUI 套件共 21 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃与下载等；加上原生冒烟共 22 项。
 
 `CHROMEL_TEST_ONLY=a.el,b.el` 可只跑子集（原生冒烟总会先跑）。但 fixture 的标题在同一个 profile 里第一次是 `…-ready`、之后才是 `…-restored`，所以过滤掉"播种"的那一条会让 `…-restored` 永远等不到标题。`test-gui.py` 检测到筛选后的第一条不是播种测试时，会自动在前面补一条 `gui-smoke.el`。
 
@@ -403,7 +411,7 @@ GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、
 - **弹窗是单层的**：每个弹窗都是独立 page（独立 `CefBrowser`），共享同一个 profile，但弹窗里的 `target=_blank` 会再开一个标签，不形成浏览器意义上的 window 层级；
 - **DevTools 只回传弹窗**：DevTools 窗口有自己的 `DevToolsClient(owner)`，在浏览器注册表里占一项（`shutdown()` 与计数都依赖它）；除“用户在 DevTools 里点开链接”会按所属页面开新标签外，它的 title/URL/焦点等事件不回报——那些属于检查器，没有对应的 Emacs buffer；
 - **设置窗口一次一个**：已打开时再请求另一个 `chrome://` 页面不会切换 target（既有行为）；
-- **不做 Chrome 同步/书签/下载管理**：这些功能需要 Google 账号体系，当前版本有意不实现；
+- **不做 Chrome 同步/书签**：这些功能需要 Google 账号体系，当前版本有意不实现；下载只落到固定目录，没有搁架、列表或断点续传界面；
 - **CEF 版本固定**：`cef.lock.json` 锁定版本与 SHA-1，升级需要重新构建并跑完整套件（API/行为差异主要出现在 `CefWindowInfo`、runtime style 与 sandbox）。
 
 ---
