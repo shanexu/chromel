@@ -22,10 +22,10 @@
 原先只构建 `chromel-pump-probe`，模块编译失败时套件仍用上一次的 `build/chromel-module.dylib` 跑完并"通过"（本轮实际撞到过）。现在同时构建 `chromel-module`，失败即 `SystemExit`，并断言 dylib 存在。
 **已验证**：故意 `#error` → 3 秒退出、rc=1、零个 Emacs 进程启动；恢复后 `CHROMEL_TEST_ONLY=smoke` 全 PASS。
 
-### A2 GUI 脚本依赖环境窗口尺寸
-默认 frame 约 560×462 点，`gui-hints`/`gui-features` 的可见元素与坐标都隐含这个尺寸；`gui-controls.el:168`、`gui-hold.el:158`、`gui-scroll-modal.el:122` 已显式 `(set-frame-size nil 1100 750 t)`。
-**做法**：所有 GUI 脚本统一在开头设固定尺寸（并在退出时还原）。
-**验收**：在两种显示器/缩放设置下结果一致。
+### A2 ✅ 所有 GUI 脚本跑在同一个固定尺寸的 frame 里
+这些脚本的几何断言隐含一个 frame 尺寸，而默认值随显示器和字体变化（`gui-hints` 曾在只有 224px 高时把 6 个链接砍到 2 个）。
+新增 `test/gui-frame.el` 只做一件事：`(set-frame-size nil 1100 750 t)`；`scripts/test-gui.py` 在加载每个脚本前先 `-l test/gui-frame.el`。原先 4 个脚本里的同尺寸调用保留（幂等，也方便单文件手跑）。
+**验证**：完整套件在新尺寸下 20/20 PASS —— 这一轮同时证明了 C4：旧的硬编码 `a a s` 在 1100×750 下必然失败（可见链接变多、标签变长）。
 
 ### A3 ✅ CI 已拿到绿灯（Linux 跑 ERT，macOS 手动跑原生）
 `.github/workflows/ci.yml` 两个作业：
@@ -102,8 +102,10 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ### C3 ✅ 已知限制已写入 README
 行为未改（仍由 Emacs 开新标签），但 README「数据和能力边界」明确写出：页面发起的新窗口转成新的 Emacs buffer，`window.opener` 关系不保留，依赖脚本弹窗通信的登录流程可能不兼容。要真正支持需要区分「用户手势链接」与「脚本 window.open」，属于行为改造，不在此轮范围。
 
-### C4 hints 标签依赖可见数量
-`gui-hints` 曾因可见链接从 6 降到 2、标签退化成单字母而超时。**做法**：`test/gui-hints.el` 不假设标签长度/数量（按 `hints` 返回的 label 逐个敲），或固定窗口尺寸后断言完整列表。
+### C4 ✅ hints 测试按 URL 选标签，不再硬编码按键
+`gui-hints` 原先发 `(unread-command-events '(?a ?a ?s))` 并强制 `chromel-hint-alphabet "as"`，前提是"只有两个可见链接"。可见数量一变（窗口高度、显示器、缩放），标签就变，测试随即超时。
+现在 `chromel-test--follow-link-to` 用 `cl-letf` 替换 `chromel--read-hint`：从 overlay 返回的 hints 里挑 `:url` 以 `/hint-target` 结尾的那条，读它的真实 label（注意返回必须是 `(:label …)` plist，`chromel-follow` 会再拿它去 `prepare`）。
+**验证**：`CHROMEL_TEST_ONLY=smoke,hints` PASS；并在 A2 把窗口放大到 1100×750 后仍然 PASS（旧写法在这一步必挂）。
 
 ### C5 ✅ 泵的空闲判定改问 native
 `chromel_core.h` 新增 `int browser_count();`（只读 `browsers` + `settingsBrowsers`，**不**经 `requireReady`，CEF 未初始化时返回 0）；模块导出 `chromel--native-browser-count`；Elisp 新增 `chromel--native-has-browsers-p`，`chromel--pump-needed-p` 用它取代原先永不重置的 `chromel--settings-open`（该变量已删除）。`chromel-settings` 改为「先发 settings 命令、再 `chromel--ensure-timer`」，因为窗口是在那条命令里同步创建的。API 版本随之升到 2。ERT 新增 2 条并更新 2 条（无页面/无浏览器时停泵、设置窗口存在时继续泵、模块未加载时不问 native）。
