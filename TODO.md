@@ -102,7 +102,7 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 ### B6-old 旧描述（已完成，留档）
 
-### B7 全局状态（进行中：两刀已落地）
+### B7 全局状态（进行中：三刀已落地）
 21 个全局 defvar、单个 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。
 
 **已做（第一刀）**：`Page` 与两张 id→对象表搬进 `native/page.h` / `native/page.mm`，连同 `pageFor`、`ownsFocus`、`stopScroll`、`scrollPage`、`unfocus` 五个按 page 操作的助手。
@@ -112,7 +112,11 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 `chromel_core.mm` 1311 → 1240 → **1186** 行，`page.mm` 58 → **153** 行。
 
-**待做**：`settings*` 六个全局收进 `SettingsState`（约 200 行，下一刀）；`queue/emit` 与键盘路径各自分文件；最后才是把 `extern` 换成 registry 访问器。
+**已做（第三刀）**：管理窗口整体搬进 `native/settings.h` / `native/settings.mm`（267 行）—— 八个 `settings*` 全局、`SettingsClient`/`SettingsViewDelegate`/`SettingsWindowDelegate`/`SettingsTestObserver`、URL 策略（`loweredAuthority`/`isPrivilegedChromeURL`/`isSettingsURL`）、`openSettings`/`closeSettings`。core 1186 → **992** 行，只留 CEF 回调与编排。
+
+对外只暴露语义，不暴露状态：`makeSettingsClient()`（`App::GetDefaultClient` 用）、`settingsWindowOpen()`/`settingsBrowserCount()`（泵、`info()`、`browser_count()`）、`inspectSettings()`（`inspect(0)`）、`resetSettingsState()`（`shutdown()` 两条路径都调）、以及三个测试钩子 `showSettingsWindow()`/`closeSettingsWindow()`/`runSettingsScript()`。core 反向提供两个谓词给 settings：`quietDesktopMode()`、`testSwitchesEnabled()` —— 测试开关仍只有一份定义。
+
+**待做**：`queue/emit` 与键盘路径各自分文件（`emit` 被 40 多处调用，价值低于前几刀）；最后才是把 `extern` 换成 registry 访问器。
 
 ### B8 ❌ 不修（调研结论：没有替代品）
 调研目标：能否用 `(frame-parameter frame 'window-id)` 直接拿 NSWindow number，从而删掉 `chromel--frame-handle` 里"临时改 title → 按 title 找窗口"的借用。
