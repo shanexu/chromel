@@ -61,6 +61,12 @@ HTTP; an http(s) URL is used as given."
   :type '(choice (const :tag "Direct, no proxy" nil)
                  file
                  (string :tag "PAC URL")))
+
+(defcustom chromel-blocklist-file (expand-file-name "data/blocklist.txt" chromel--directory)
+  "Host blocklist snapshot used by the content blocker.
+The file is loaded when CEF starts; a missing file just disables blocking.
+`scripts/ubol-to-blocklist.py' regenerates it from the uBOL rulesets."
+  :type 'file)
 (defcustom chromel-download-directory (expand-file-name "~/Downloads")
   "Directory downloads are written to.
 Chromium has no download shelf here, so the backend saves the file with the
@@ -222,6 +228,8 @@ native side has finished tearing them down; pumping must continue until then.")
     (set-file-modes chromel-data-directory #o700)
     (chromel--ensure-module)
     (chromel--apply-proxy-pac)
+    (chromel--blocker-load-exceptions)
+    (chromel--blocker-apply)
     ;; Chromium's macOS sandbox authorizes MainBundlePath, not CEF's bundle
     ;; override, so the bundle is whatever this process actually runs in: the
     ;; launcher's private bundle or an Emacs.app with the framework inside it.
@@ -727,6 +735,9 @@ not create a browser tab."
 (declare-function chromel--native-is-settings-url "chromel-module" (url))
 (declare-function chromel--native-api-version "chromel-module" ())
 (declare-function chromel--native-set-proxy-pac "chromel-module" (url))
+(declare-function chromel--native-blocklist-load "chromel-module" (path))
+(declare-function chromel--native-blocklist-set-exceptions "chromel-module" (text))
+(declare-function chromel--native-blocklist-info "chromel-module" ())
 (declare-function chromel--native-set-download-directory "chromel-module" (directory))
 (declare-function chromel--native-permission-reply "chromel-module" (id decision))
 
@@ -839,6 +850,116 @@ when a download actually starts."
     (chromel--native-set-download-directory
      (file-name-as-directory (expand-file-name chromel-download-directory)))))
 
+;;; Content blocker
+
+(defvar chromel--blocker-exceptions nil
+  "Host suffixes the user switched the blocker off for.
+Kept in `blocker.json' so the choice survives restarts.")
+
+(defvar chromel--blocker-public-suffixes
+  '("co.uk" "org.uk" "ac.uk" "me.uk" "com.cn" "net.cn" "org.cn" "gov.cn"
+    "com.au" "net.au" "org.au" "co.jp" "ne.jp" "or.jp" "co.kr" "or.kr"
+    "com.br" "com.tw" "com.hk" "com.sg" "github.io" "appspot.com"
+    "herokuapp.com" "cloudfront.net")
+  "Parents a widened toggle must refuse: switching off a registry is never meant.")
+
+(defun chromel--blocker-file ()
+  (expand-file-name "blocker.json" chromel-data-directory))
+
+(defun chromel--blocker-page-host ()
+  "Return the host of the page in the current buffer."
+  (unless (and (derived-mode-p 'chromel-mode) (stringp chromel--url))
+    (user-error "This buffer has no page"))
+  (require 'url-parse)
+  (let ((host (url-host (url-generic-parse-url chromel--url))))
+    (unless (and (stringp host) (not (string-empty-p host)))
+      (user-error "Cannot tell which site this page belongs to"))
+    (downcase host)))
+
+(defun chromel--blocker-parent (host)
+  "Return the parent of HOST, refusing to go past a public suffix."
+  (let ((parts (split-string host "\\." t)))
+    (when (< (length parts) 3)
+      (user-error "Cannot widen %s any further" host))
+    (let ((parent (mapconcat #'identity (last parts 2) ".")))
+      (when (member parent chromel--blocker-public-suffixes)
+        (user-error "%s is a public suffix; refusing to switch it off" parent))
+      parent)))
+
+(defun chromel--blocker-load-exceptions ()
+  (setq chromel--blocker-exceptions nil)
+  (let ((file (chromel--blocker-file)))
+    (when (file-readable-p file)
+      (condition-case nil
+          (with-temp-buffer
+            (insert-file-contents file)
+            (let ((data (json-parse-buffer :array-type 'list)))
+              (when (and (listp data) (cl-every #'stringp data))
+                (setq chromel--blocker-exceptions data))))
+        (error nil)))))
+
+(defun chromel--blocker-save-exceptions ()
+  (make-directory chromel-data-directory t)
+  (let* ((file (chromel--blocker-file))
+         (temp (make-temp-file (expand-file-name "blocker-" chromel-data-directory))))
+    (with-temp-file temp
+      (insert (json-serialize (vconcat chromel--blocker-exceptions)) "\n"))
+    (set-file-modes temp #o600)
+    (rename-file temp file t)))
+
+(defun chromel--blocker-apply ()
+  "Load the blocklist into the running backend.
+Returns non-nil when a list is live.  A missing or broken file only disables
+blocking: it must never stop the browser from starting."
+  (let ((file (expand-file-name chromel-blocklist-file)))
+    (cond
+     ((not (file-readable-p file))
+      (message "Chromel: no blocklist at %s" file)
+      nil)
+     ((not (fboundp 'chromel--native-blocklist-load))
+      (message "Chromel: this module has no blocklist support; rebuild it")
+      nil)
+     (t
+      (condition-case error
+          (progn
+            (chromel--native-blocklist-load file)
+            (chromel--native-blocklist-set-exceptions
+             (mapconcat #'identity chromel--blocker-exceptions "\n"))
+            t)
+        (error
+         (message "Chromel: cannot load %s: %s" file (error-message-string error))
+         nil))))))
+
+(defun chromel-blocker-toggle-site (&optional arg)
+  "Stop blocking ads on this site, or start again.
+With ARG, widen to the parent domain instead of the exact host.  Public
+suffixes are refused: `co.uk' is not a site.  The choice is remembered in
+`blocker.json'."
+  (interactive "P")
+  (let* ((host (chromel--blocker-page-host))
+         (target (if arg (chromel--blocker-parent host) host))
+         (off (member target chromel--blocker-exceptions)))
+    (setq chromel--blocker-exceptions
+          (if off (delete target chromel--blocker-exceptions)
+            (cons target chromel--blocker-exceptions)))
+    (chromel--blocker-save-exceptions)
+    (chromel--blocker-apply)
+    (message "Chromel blocker: %s %s" target (if off "on again" "off"))))
+
+(defun chromel-blocker-status ()
+  "Report how many rules are loaded and whether this site opted out."
+  (interactive)
+  (let* ((host (ignore-errors (chromel--blocker-page-host)))
+         (info (if (fboundp 'chromel--native-blocklist-info)
+                   (chromel--native-blocklist-info)
+                 "rules=0 blocked=0"))
+         (site (cond ((not host) "no page")
+                     ((member host chromel--blocker-exceptions) "off")
+                     ((cl-some (lambda (suffix) (string-suffix-p suffix host))
+                               chromel--blocker-exceptions)
+                      "off (parent)")
+                     (t "on"))))
+    (message "Chromel blocker: %s; %s %s" info (or host "-") site)))
 (defun chromel--check-module-api ()
   "Refuse to run against a dylib built for a different API version.
 `module-load' keeps whatever library it already loaded, so a stale build
