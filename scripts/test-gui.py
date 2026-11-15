@@ -132,6 +132,13 @@ try:
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:
             tests = [t for t in tests if any(part in t[1] or part in t[0] for part in only)]
+            # The fixture answers "ready" until some earlier test has written its
+            # cookie and localStorage; every "…-restored" expectation therefore
+            # depends on the run order.  Filtering could drop that seed and leave
+            # a script waiting forever for a title that can never appear.
+            if tests and tests[0][0] not in ("chromel-emacs-ready", "session-seed", "settings-seed",
+                                             "password-seed", "management"):
+                tests.insert(0, ("chromel-emacs-ready", "gui-smoke.el"))
         for expected, script in tests:
             route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
                      'gui-scroll-modal.el': '/scroll-modal'}.get(script, '/fixture')
