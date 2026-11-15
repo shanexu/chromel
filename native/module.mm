@@ -30,7 +30,7 @@ emacs_value signalText(emacs_env* env, const char* text) {
   env->non_local_exit_signal(env, env->intern(env, "error"), list);
   return env->intern(env, "nil");
 }
-enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath };
+enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending };
 emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexcept {
  @autoreleasepool {
   emacs_value nilValue = env->intern(env, "nil");
@@ -66,6 +66,7 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
       case IsSettingsUrl: return chromel::is_settings_url(first) ? env->intern(env, "t") : nilValue;
       case ApiVersion: return env->make_integer(env, chromel::kChromelApiVersion);
       case BrowserCount: return env->make_integer(env, chromel::browser_count());
+      case PumpPending: return env->make_integer(env, chromel::pump_pending() ? 1 : 0);
     }
     return env->intern(env, "t");
   } catch (const std::exception& error) {
@@ -100,6 +101,7 @@ extern "C" int emacs_module_init(emacs_runtime* runtime) noexcept {
     {"info", 0, Info, "Return native runtime diagnostics."},
     {"hints-script", 0, HintsScript, "Return the embedded hint overlay JavaScript."},
     {"bundle-path", 0, BundlePath, "Return the bundle this process runs in."},
+    {"pump-pending", 0, PumpPending, "Return 1 when CEF has work scheduled for the message loop."},
     {"inspect", 1, Inspect, "Return actual Cocoa geometry and focus state of browser ID as JSON."},
     {"is-settings-url", 1, IsSettingsUrl, "Return non-nil when URL belongs in the shared Chrome-style window."},
     {"browser-count", 0, BrowserCount, "Return how many CEF browsers, embedded or settings windows, are alive."},

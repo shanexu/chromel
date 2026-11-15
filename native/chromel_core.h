@@ -5,7 +5,7 @@
 namespace chromel {
 // Bumped whenever a chromel--native-* signature or semantic changes; the elisp
 // side refuses to run against a module that reports a different number.
-constexpr int kChromelApiVersion = 3;
+constexpr int kChromelApiVersion = 4;
 int api_version();
 // How many CEF browsers (embedded pages or settings windows) are alive.
 // Safe before CefInitialize.
@@ -25,6 +25,8 @@ void layout(int id, long window, double x, double y, double width, double height
 void hide(int id);
 void command(int id, const std::string& action, const std::string& argument);
 void pump();
+// True when CEF has scheduled work for the message loop.
+bool pump_pending();
 std::string events();
 std::string info();
 std::string inspect(int id);
