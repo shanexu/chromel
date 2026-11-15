@@ -342,6 +342,16 @@ class Client final : public CefClient,
     }
     return false;
   }
+  void OnRenderProcessTerminated(CefRefPtr<CefBrowser> browser, TerminationStatus status,
+                                 int errorCode, const CefString& errorString) override {
+    // The renderer is gone: this browser will never report anything else, and
+    // without a page of its own the tab just goes blank.
+    NSDictionary* payload = @{@"status": @(static_cast<int>(status)), @"code": @(errorCode),
+                              @"message": ns(errorString.ToString())};
+    NSData* data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+    emit(id_, @"crashed",
+         data ? ns(std::string(static_cast<const char*>(data.bytes), data.length)) : @"");
+  }
   void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
     CEF_REQUIRE_UI_THREAD();
     browsers.erase(browser->GetIdentifier());
