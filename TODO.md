@@ -45,6 +45,11 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 接线：`scripts/test-gui.py` 在拉起 19 个 GUI Emacs 之前先跑它（独立临时 profile，要求 `rc=0` 且输出含 `PASS:`），构建目标里也加上 `chromel-smoke`，避免用旧二进制跑绿。
 **验证**：`build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test "$TMPDIR/x"` 输出 `PASS: renderer, navigation, layout, cross-window reparenting, hide, close, shutdown`；完整套件 `python3 scripts/test-gui.py` → `rc=0`，20 项全绿。
 
+### A7 ✅ CEF 的 bundle 不再靠 `invocation-directory` 猜
+`chromel--start` 原本用 `(expand-file-name "../.." invocation-directory)` 反推宿主 bundle，再用"framework 是否在里面"做校验。实测（相对路径启动 `build/EmacsChromel.app/Contents/MacOS/Emacs`）：`invocation-directory` 返回 `/Users/shane/build/EmacsChromel.app/Contents/MacOS/` —— 少了 `src/github.com/guidao/chromel/` 一段，检测失败、回落到 `ChromelRuntime.app`，最后被 CEF 的 sandbox 检查拒绝（`CEF sandbox requires its framework inside the running app bundle`）。软链、`open`、从 GUI 启动都可能触发同类问题。
+**做法**：native 新增 `bundle_path()`（`NSBundle.mainBundle.bundlePath`）与 `chromel--native-bundle-path`，`chromel--start` 直接采信 AppKit；旧模块没有该函数时退回 `file-truename` 版本。模块 API 升到 **3**。
+**验证**：同一探针（相对路径启动 + `(chromel "https://example.org/")` + `chromel--sync` + `inspect`）从 `rc=1 / "CEF sandbox requires…"` 变为 `rc=0`，inspect 正常返回几何与 `window`；构建 0 警告；ERT 35/35；`CHROMEL_TEST_ONLY=smoke,controls` 全 PASS。
+
 ## B. 架构
 
 ### B1 `command()` 表驱动化
@@ -67,7 +72,7 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 **验证**：构建 0 警告；`module=9610 file=9610 equal=t`；ERT 35/35；`CHROMEL_TEST_ONLY=smoke,hints` PASS。
 
 ### B5 ✅ 没有 Elisp↔模块 ABI 握手
-`chromel_core.h` 新增 `kChromelApiVersion`（C5 之后为 2）与 `api_version()`，模块导出 `chromel--native-api-version`；`chromel-module-api-version` 与 `chromel--check-module-api` 在 `chromel--ensure-module` 末尾断言，缺函数或数字不符都直接 `user-error` 并提示 `./scripts/build.sh`。ERT 增 2 条（一致、`nil` 与 `99` 两种不符），31/31 通过（C5 升到 2 后为 35/35）。
+`chromel_core.h` 新增 `kChromelApiVersion`（A7 之后为 3）与 `api_version()`，模块导出 `chromel--native-api-version`；`chromel-module-api-version` 与 `chromel--check-module-api` 在 `chromel--ensure-module` 末尾断言，缺函数或数字不符都直接 `user-error` 并提示 `./scripts/build.sh`。ERT 增 2 条（一致、`nil` 与 `99` 两种不符），31/31 通过（C5 升到 2 后为 35/35）。
 
 ### B6 testMode 渗进生产路径
 `command()`/`click`/`initialize()` 里散落 `testMode` 分支。**做法**：收敛到单一 `isTestMode()` + 一处文档说明，避免将来在正式路径误开。
@@ -75,8 +80,15 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 ### B7 全局状态
 21 个全局 defvar、单个 1039 行 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。**做法**：先把 settings 相关 6 个全局收进一个 `SettingsState`，作为中间步。
 
-### B8 用 frame title 找 NSWindow
-`chromel.el:191-206` 的 `chromel--frame-handle` 临时改 frame title、调 `chromel--native-bind` 再改回。**先调研**：Cocoa 的 `(frame-parameter frame 'window-id)` 是否已给出 NSWindow number；能拿到就删掉这个 hack。
+### B8 ❌ 不修（调研结论：没有替代品）
+调研目标：能否用 `(frame-parameter frame 'window-id)` 直接拿 NSWindow number，从而删掉 `chromel--frame-handle` 里"临时改 title → 按 title 找窗口"的借用。
+**实测否决**（`test/gui-smoke.el` 临时插桩，同一进程同一时刻读取）：
+```
+(frame-parameter nil 'window-id)  → "1"      ; 字符串，Emacs 自己的帧计数器
+(chromel--native-inspect id)     → 1630     ; 真正的 NSWindow.windowNumber
+```
+NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-id` 为 nil，与 AppKit 无关。窗口标题借用保留；`unwind-protect` 已保证标题一定还原，token 里带 pid 与随机串，撞车概率可忽略。
+（顺带修掉了同一条链上的真 bug：见 A7。）
 
 ## C. 行为与 UX
 

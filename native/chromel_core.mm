@@ -806,6 +806,10 @@ bool is_settings_url(const std::string& url) { return isSettingsURL(url); }
 
 std::string hints_script() { return kChromelHintsSource; }
 
+std::string bundle_path() {
+  @autoreleasepool { return utf8(NSBundle.mainBundle.bundlePath); }
+}
+
 int create(long handle, const std::string& url) {
   requireReady();
   NSWindow* win = windowFor(handle);

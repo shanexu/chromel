@@ -31,6 +31,9 @@
 
 ### 测试与构建
 
+- CEF 的 bundle 不再由 Elisp 从 `invocation-directory` 猜：新增 `chromel--native-bundle-path`（`NSBundle.mainBundle.bundlePath`），路径做 `file-truename` 兜底，软链/`open`/GUI 启动都不会再拿错 bundle（模块 API 升到 3）。
+
+
 - `native/hints.js` 与 `scroll.js` 一样在构建期内嵌进模块，Elisp 不再每次 follow 读磁盘；脚本与 dylib 不会再出现版本错配。
 - 原生冒烟宿主改为直接构建进 `ChromelRuntime.app/Contents/MacOS/ChromelRuntime`，可以脱离 Emacs 单独运行；`scripts/test-gui.py` 现在先跑它再拉起 19 个 GUI 进程（共 20 项）。
 
