@@ -1,11 +1,29 @@
 ;;; gui-hints.el --- Link hints in a real renderer -*- lexical-binding: t; -*-
 (require 'chromel)
+(require 'cl-lib)
 (setq chromel-data-directory (file-name-as-directory (getenv "CHROMEL_TEST_PROFILE")))
 (defvar chromel-test--source nil)
 (defvar chromel-test--child nil)
 (defvar chromel-test--phase 'loading)
 (defvar chromel-test--deadline (+ (float-time) 35))
 (defvar chromel-test--busy nil)
+
+(defun chromel-test--follow-link-to (suffix command)
+  "Pick the hint whose URL ends with SUFFIX and run COMMAND.
+
+The overlay labels only the entries that fit the viewport, so a shorter window
+yields fewer (and differently labelled) hints.  Choosing by URL keeps this test
+independent of how many links happen to be visible."
+  (cl-letf (((symbol-function 'chromel--read-hint)
+             (lambda (hints session)
+               (let ((entry (seq-find (lambda (hint)
+                                        (let ((url (plist-get hint :url)))
+                                          (and (stringp url) (string-suffix-p suffix url))))
+                                      hints)))
+                 (unless entry (error "No hint for %s among %S" suffix hints))
+                 (chromel--hint-call session "filter" (plist-get entry :label))
+                 (list :label (plist-get entry :label))))))
+    (funcall command)))
 
 (defun chromel-test--assert (value description)
   (unless value (error "%s" description)))
@@ -56,8 +74,7 @@
              (chromel-test--assert (= 0 (chromel-test--overlay-count)) "Cancel left hint badges behind")
              (chromel-test--trace "Opening new buffer by label")
              ;; A completed label opens a new buffer without Return.
-             (let ((unread-command-events '(?a ?a ?s)) (chromel-hint-alphabet "as"))
-               (chromel-follow-new-buffer))
+             (chromel-test--follow-link-to "/hint-target" #'chromel-follow-new-buffer)
              (setq chromel-test--phase 'opening)))
           ('opening
            (when (not (eq (window-buffer (selected-window)) chromel-test--source))
@@ -76,7 +93,7 @@
              (switch-to-buffer chromel-test--source)
              (chromel--sync)
              (chromel-test--assert (= 0 (chromel-test--overlay-count)) "New-buffer follow left badges behind")
-             (let ((unread-command-events '(?a ?a ?s)) (chromel-hint-alphabet "as")) (chromel-follow))
+             (chromel-test--follow-link-to "/hint-target" #'chromel-follow)
              (chromel-test--assert (eq (window-buffer (selected-window)) chromel-test--source) "Current-page follow made a buffer")
              (setq chromel-test--phase 'followed)))
           ('followed
