@@ -48,6 +48,9 @@ bool pumping = false;
 std::atomic<bool> pumpPending{false};
 std::unique_ptr<ChromelHostWakeup> hostWakeup;
 std::string profilePath;
+// Read by OnBeforeCommandLineProcessing, i.e. exactly once per process.  See
+// set_proxy_pac() for why there is no runtime setter.
+std::string proxyPacUrl;
 // Three separate promises that used to share one flag.  Naming them keeps the
 // production paths honest: "we are a test process" is not the same statement as
 // "do not show or focus windows" or "do not touch the real Keychain".
@@ -173,6 +176,12 @@ class App final : public CefApp, public CefBrowserProcessHandler {
   }
   void OnBeforeCommandLineProcessing(const CefString& processType,
                                      CefRefPtr<CefCommandLine> commandLine) override {
+    // Proxy configuration is read from the command line once, at startup.  The
+    // elisp side hands us a PAC URL before initialize() so Chromium does the
+    // per-request routing itself; nothing here can change it later.
+    if (processType.empty() && !proxyPacUrl.empty()) {
+      commandLine->AppendSwitchWithValue("proxy-pac-url", proxyPacUrl);
+    }
     // Test-only Chromium facility: never ask the user's Keychain to authorize
     // disposable, repeatedly re-signed test apps.  Production uses Keychain.
     if (testSwitches.hermetic && processType.empty()) {
@@ -732,6 +741,8 @@ int browser_count() {
 }
 
 bool is_settings_url(const std::string& url) { return isSettingsURL(url); }
+
+void set_proxy_pac(const std::string& url) { proxyPacUrl = url; }
 
 std::string hints_script() { return kChromelHintsSource; }
 

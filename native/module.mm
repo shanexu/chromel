@@ -32,7 +32,7 @@ emacs_value signalText(emacs_env* env, const char* text) {
   env->non_local_exit_signal(env, env->intern(env, "error"), list);
   return env->intern(env, "nil");
 }
-enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory, PermissionReply };
+enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory, PermissionReply, SetProxyPac };
 emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexcept {
  @autoreleasepool {
   emacs_value nilValue = env->intern(env, "nil");
@@ -45,7 +45,8 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
     std::string first, second;
     int64_t numbers[6] = {};
     if (op == Init) { first = string(0); second = string(1); }
-    if (op == Bind || op == IsSettingsUrl || op == SetDownloadDirectory) first = string(0);
+    if (op == Bind || op == IsSettingsUrl || op == SetDownloadDirectory ||
+        op == SetProxyPac) first = string(0);
     if (op == Create) { numbers[0] = integer(0); first = string(1); }
     if (op == Layout) for (int i = 0; i < 6; ++i) numbers[i] = integer(i);
     if (op == Hide || op == Command || op == Inspect) numbers[0] = integer(0);
@@ -74,6 +75,7 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
       case BrowserCount: return env->make_integer(env, chromel::browser_count());
       case PumpPending: return env->make_integer(env, chromel::pump_pending() ? 1 : 0);
       case SetDownloadDirectory: chromel::set_download_directory(first); break;
+      case SetProxyPac: chromel::set_proxy_pac(first); break;
     }
     return env->intern(env, "t");
   } catch (const std::exception& error) {
@@ -108,6 +110,7 @@ extern "C" int emacs_module_init(emacs_runtime* runtime) noexcept {
     {"info", 0, Info, "Return native runtime diagnostics."},
     {"hints-script", 0, HintsScript, "Return the embedded hint overlay JavaScript."},
     {"set-download-directory", 1, SetDownloadDirectory, "Choose where downloads are written."},
+    {"set-proxy-pac", 1, SetProxyPac, "Point Chromium at a PAC file; empty disables. Next start only."},
     {"permission-reply", 2, PermissionReply, "Answer a parked permission prompt: id, allow or deny."},
     {"bundle-path", 0, BundlePath, "Return the bundle this process runs in."},
     {"pump-pending", 0, PumpPending, "Return 1 when CEF has work scheduled for the message loop."},

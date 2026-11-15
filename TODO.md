@@ -154,6 +154,16 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ### C5 ✅ 泵的空闲判定改问 native
 `chromel_core.h` 新增 `int browser_count();`（只读 `browsers` + `settingsBrowsers`，**不**经 `requireReady`，CEF 未初始化时返回 0）；模块导出 `chromel--native-browser-count`；Elisp 新增 `chromel--native-has-browsers-p`，`chromel--pump-needed-p` 用它取代原先永不重置的 `chromel--settings-open`（该变量已删除）。`chromel-settings` 改为「先发 settings 命令、再 `chromel--ensure-timer`」，因为窗口是在那条命令里同步创建的。API 版本随之升到 2。ERT 新增 2 条并更新 2 条（无页面/无浏览器时停泵、设置窗口存在时继续泵、模块未加载时不问 native）。
 
+### C9 ✅ 没有代理配置
+
+CEF 的代理只认命令行：`--proxy-server` 或 `--proxy-pac-url`，都在浏览器进程启动时读一次。以前 Chromel 两者都没接，所以无论用户环境怎么配，页面永远直连。
+
+现在 `chromel-proxy-pac-file` 接受 PAC 文件或 URL：native 在 `OnBeforeCommandLineProcessing` 追加 `proxy-pac-url`，Elisp 在 `chromel--start` 里先把它交过去。实测这个构建**取不到 `file://` 的 PAC**（静默退回直连），所以文件路径由 `chromel--pac-server-url` 在 `127.0.0.1` 起一个只回答 `/proxy.pac` 的 HTTP 服务喂给 Chromium；`http(s)://` 地址原样使用。
+
+`scripts/smartproxy-to-pac.py` 把 SmartProxy 的完整备份转成 PAC：按 `activeProfileId` 选 profile，保留规则顺序，`whiteList` → DIRECT，协议映射 `PROXY/HTTPS/SOCKS4/SOCKS5`，未匹配主机默认 DIRECT（`--default-proxy` 可改）。针对用户实际导出的 44 条规则生成成功，46 行返回值；用本机 clash（`SOCKS5 127.0.0.1:7890`）实测：未匹配的 `example.org` 直连加载，命中的 `mikanani.me` 经代理加载出真实标题。
+
+**验证**：`--proxy-server=127.0.0.1:9` 让两个站点都失败（证明命令行代理生效）；`file://` 与 `data:` 的 PAC 都静默退回直连；`http://127.0.0.1:<port>/proxy.pac` 的 PAC 生效；ERT 44/44（含 `chromel--pac-url` 起服务并回读脚本的用例）。
+
 ### C8 ✅ 权限请求无声拒绝
 
 `Client` 之前没实现 `CefPermissionHandler`，于是通知、地理位置、摄像头/麦克风、剪贴板读取在 Alloy 风格下落到默认处理 = `CEF_PERMISSION_RESULT_IGNORE`，网页只会看到"用户拒绝"，用户什么也没看到。

@@ -48,6 +48,19 @@ exactly one %s.  Examples:
   https://www.google.com/search?q=%s
   https://search.example.org/find?query=%s"
   :type '(string :tag "URL template containing %s"))
+(defcustom chromel-proxy-pac-file nil
+  "PAC file or PAC URL that tells Chromium how to route requests.
+Chromium evaluates the script for every request, so the file decides which
+proxy (if any) each host uses.  Nil means direct connections only.
+
+The browser process reads this once, when it starts: Chromium resolves proxies
+at startup and CEF offers no runtime equivalent of Chrome's `chrome.proxy'
+API, so changing the file takes effect on the next Emacs start.  Chromium here
+will not fetch a file:// PAC, so a file path is served to it over loopback
+HTTP; an http(s) URL is used as given."
+  :type '(choice (const :tag "Direct, no proxy" nil)
+                 file
+                 (string :tag "PAC URL")))
 (defcustom chromel-download-directory (expand-file-name "~/Downloads")
   "Directory downloads are written to.
 Chromium has no download shelf here, so the backend saves the file with the
@@ -208,6 +221,7 @@ native side has finished tearing them down; pumping must continue until then.")
     (make-directory chromel-data-directory t)
     (set-file-modes chromel-data-directory #o700)
     (chromel--ensure-module)
+    (chromel--apply-proxy-pac)
     ;; Chromium's macOS sandbox authorizes MainBundlePath, not CEF's bundle
     ;; override, so the bundle is whatever this process actually runs in: the
     ;; launcher's private bundle or an Emacs.app with the framework inside it.
@@ -712,10 +726,11 @@ not create a browser tab."
 
 (declare-function chromel--native-is-settings-url "chromel-module" (url))
 (declare-function chromel--native-api-version "chromel-module" ())
+(declare-function chromel--native-set-proxy-pac "chromel-module" (url))
 (declare-function chromel--native-set-download-directory "chromel-module" (directory))
 (declare-function chromel--native-permission-reply "chromel-module" (id decision))
 
-(defconst chromel-module-api-version 6
+(defconst chromel-module-api-version 7
   "API version this file expects from `chromel-native-module'.
 Bump together with `chromel::kChromelApiVersion' whenever a
 `chromel--native-*' signature or meaning changes.")
@@ -734,6 +749,87 @@ build is not misreported as a bad URL.  Always returns non-nil."
     (chromel--check-module-api)
     (chromel--apply-download-directory))
   t)
+
+(defvar chromel--pac-server nil
+  "Loopback HTTP server that serves `chromel--pac-file' to Chromium.")
+
+(defvar chromel--pac-file nil
+  "Absolute name of the file `chromel--pac-server' hands out.")
+
+(defun chromel--pac-body ()
+  "Return the PAC source to serve, or nil when the file is unreadable."
+  (when (and chromel--pac-file (file-readable-p chromel--pac-file))
+    (with-temp-buffer
+      (set-buffer-multibyte nil)
+      (insert-file-contents-literally chromel--pac-file)
+      (buffer-string))))
+
+(defun chromel--pac-respond (process request)
+  "Answer one PAC request on PROCESS after reading REQUEST's headers."
+  (let* ((body (when (string-match-p "\\`GET /proxy\\.pac" request)
+                 (chromel--pac-body)))
+         (response (if body
+                       (format (concat "HTTP/1.1 200 OK\r\n"
+                                       "Content-Type: application/x-ns-proxy-autoconfig\r\n"
+                                       "Content-Length: %d\r\n"
+                                       "Connection: close\r\n\r\n%s")
+                               (string-bytes body) body)
+                     (concat "HTTP/1.1 404 Not Found\r\n"
+                             "Content-Length: 0\r\n"
+                             "Connection: close\r\n\r\n"))))
+    (ignore-errors
+      (process-send-string process response)
+      (process-send-eof process))
+    (ignore-errors (delete-process process))))
+
+(defun chromel--pac-filter (process chunk)
+  "Collect CHUNK until PROCESS has a whole request, then answer it."
+  (unless (process-get process 'answered)
+    (let ((request (concat (process-get process 'request) chunk)))
+      (if (string-match-p "\r\n\r\n" request)
+          (progn
+            (process-put process 'answered t)
+            (chromel--pac-respond process request))
+        (process-put process 'request request)))))
+
+(defun chromel--pac-server-url (file)
+  "Serve FILE on 127.0.0.1 and return the URL Chromium should fetch.
+Chromium here does not fetch a file:// PAC: it fails silently and falls back to
+DIRECT, so a loopback server is the difference between a rule set that works
+and one that is quietly ignored."
+  (setq chromel--pac-file (expand-file-name file))
+  (unless (process-live-p chromel--pac-server)
+    (setq chromel--pac-server
+          (make-network-process :name "chromel-pac"
+                                :server t
+                                :host "127.0.0.1"
+                                :service t
+                                :family 'ipv4
+                                :noquery t
+                                :coding 'binary
+                                :filter #'chromel--pac-filter)))
+  (format "http://127.0.0.1:%d/proxy.pac"
+          (process-contact chromel--pac-server :service)))
+
+(defun chromel--pac-url (value)
+  "Return the URL Chromium should fetch for `chromel-proxy-pac-file' VALUE.
+Nil means direct.  A URL is passed through; a file is served on loopback
+because Chromium ignores file:// PAC URLs here.  An unreadable file warns and
+connects directly rather than failing every page load."
+  (cond ((null value) "")
+        ((string-match-p "\\`[[:alpha:]][[:alnum:]+.-]*://" value) value)
+        ((file-readable-p (expand-file-name value))
+         (chromel--pac-server-url value))
+        (t (display-warning
+            'chromel
+            (format "PAC file %s is unreadable; connecting directly" value))
+           "")))
+
+(defun chromel--apply-proxy-pac ()
+  "Hand the backend its PAC URL before CEF starts.
+Runs without CEF: the value is only read by OnBeforeCommandLineProcessing."
+  (when (fboundp 'chromel--native-set-proxy-pac)
+    (chromel--native-set-proxy-pac (chromel--pac-url chromel-proxy-pac-file))))
 
 (defun chromel--apply-download-directory ()
   "Tell the backend where downloads should land.

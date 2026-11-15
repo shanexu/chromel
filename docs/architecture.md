@@ -331,6 +331,14 @@ kill-emacs → chromel--shutdown → native-shutdown
 
 写入策略：先写同目录临时文件 → `set-file-modes 600` → `rename-file` 覆盖，保证不会读到半个 JSON；读取用 `json-parse-buffer`（不 `eval`），版本不符则明确报错而不是静默丢数据。
 
+### 4.16 代理：命令行 PAC + 一个回环小服务
+
+代理配置只有一条路：`OnBeforeCommandLineProcessing` 里 `AppendSwitchWithValue("proxy-pac-url", …)`。Chromium 在浏览器进程启动时读一次，之后不再接受修改；CEF 没有 `chrome.proxy` 的等价物（代理偏好定义在 `//chrome` 层，CEF 不链接），所以 `chromel-proxy-pac-file` 的改动只在下次启动生效。
+
+`file://` 的 PAC 在这里取不到：Chromium 静默失败后退回 DIRECT，表现为"规则全不生效但页面都正常"。因此 `chromel--pac-server-url` 用 `make-network-process` 在 `127.0.0.1` 起一个只服务 `/proxy.pac` 的 HTTP 服务（端口由系统分配），`chromel--pac-url` 返回 `http://127.0.0.1:<port>/proxy.pac`。每次请求都重读文件，Chromium 若因网络变化重取会拿到最新内容。
+
+`scripts/smartproxy-to-pac.py` 把 SmartProxy 的备份翻译成 `FindProxyForURL`：保留规则顺序、白名单转 `DIRECT`、协议映射成 `PROXY/HTTPS/SOCKS4/SOCKS5`、CIDR 用 `isInNet`，并对"需要密码的服务器""path 规则""CIDR 需要 DNS"分别告警。
+
 ---
 
 ## 5. 不变量（改代码前请先读）
