@@ -187,7 +187,7 @@ Elisp 所有操作最终都走同一个入口：
 (chromel--native-command page-id action argument-json)
 ```
 
-`command()` 是一串 `if/else`（按风险从高到低排列），主要动作：
+`command()` 是一张表（`browserActions()` / `settingsActions()`）：派发只做一次 `map` 查找，每个动作是一个自带参数校验的命名条目，不再依赖 `if/else` 的先后顺序。设置窗口没有页面，用 id 0 走另一张表。主要动作：
 
 | 动作 | 说明 |
 |---|---|
@@ -401,7 +401,7 @@ GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、
 
 ## 11. 扩展点
 
-**加一个命令**：在 `chromel--command` 里发新 action → 在 `chromel_core.mm:command()` 加分支（放在合适的"风险顺序"位置）→ 需要回传就加事件类型 → 在 `chromel--handle-event` 加 `pcase` 分支。
+**加一个命令**：在 `chromel--command` 里发新 action → 在 `chromel_core.mm` 的 `browserActions()`（或设置窗口的 `settingsActions()`）里加一个条目 → 需要回传就加事件类型 → 在 `chromel--handle-event` 加 `pcase` 分支。
 
 **加一个事件**：`emit(id, @"type", value)` → Elisp `chromel--handle-event` 加分支；注意 `id == 0` 会被丢弃。
 

@@ -53,7 +53,9 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 ## B. 架构
 
 ### B1 `command()` 表驱动化
-`native/chromel_core.mm:838-1066`：约 205 行 if/else 链，每个动作各自解析 JSON 并手写类型/范围判断。
+**已完成（`command()` 表驱动）**：动作移入 `browserActions()` / `settingsActions()` 两张 `std::map`，派发只剩「查找 + 调用」；设置窗口走 id 0 的另一张表。校验逻辑逐条原样搬运，没有顺手改行为。文件从 1039 行涨到 1311 行——**行数变多是刻意的取舍**：每个条目重复一遍 lambda 签名，换来"动作名即代码名"和"派发不依赖分支顺序"。
+
+原始问题：`native/chromel_core.mm` 里约 205 行 if/else 链，每个动作各自解析 JSON 并手写类型/范围判断。
 **做法**：一张 `{name, arity, parse, run}` 表 + 请求结构体；未知动作仍抛 `Unknown browser action`。
 **收益**：新增动作不再复制解析样板；argv 校验可单测。
 
