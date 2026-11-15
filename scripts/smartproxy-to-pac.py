@@ -21,11 +21,14 @@ Known limits, reported on stderr rather than hidden:
 """
 
 import argparse
+import base64
 import datetime
 import ipaddress
 import json
 import re
+import subprocess
 import sys
+import urllib.request
 
 # src/core/definitions.ts: ProxyRuleType
 RULE_TYPES = {
@@ -158,8 +161,115 @@ def predicate(rtype, pattern, warnings):
     return None
 
 
-def build_pac(backup, profile, source, default_is_direct):
+GFWLIST_DOMAIN = re.compile(r"^\|\|([^/^|*]+)")
+GFWLIST_EXCEPTION = re.compile(r"^@@\|\|([^/^|*]+)")
+BARE_DOMAIN = re.compile(r"^([a-z0-9-]+(?:\.[a-z0-9-]+)+)$")
+GFWLIST_REGEX = re.compile(r"^/(.+)/$")
+
+
+def decode_subscription(payload):
+    """Return the list as text; gfwlist is base64, some lists are not."""
+    raw = payload.strip()
+    try:
+        decoded = base64.b64decode(raw, validate=False)
+    except Exception:
+        return raw
+    try:
+        text = decoded.decode("utf-8")
+    except UnicodeDecodeError:
+        return raw
+    return text if ("AutoProxy" in text or "||" in text or "! " in text) else raw
+
+
+def parse_subscription(text):
+    """Parse an Adblock-style / gfwlist / plain domain list.
+
+    Returns (domains, exceptions, regexes, skipped).
+    """
+    domains, exceptions, regexes = set(), set(), set()
+    skipped = 0
+    for line in text.splitlines():
+        line = line.strip()
+        if not line or line.startswith("!") or line.startswith("["):
+            continue
+        exception = GFWLIST_EXCEPTION.match(line)
+        if exception:
+            exceptions.add(exception.group(1).lower())
+            continue
+        domain = GFWLIST_DOMAIN.match(line)
+        if domain:
+            domains.add(domain.group(1).lower())
+            continue
+        bare = BARE_DOMAIN.match(line)
+        if bare:
+            domains.add(bare.group(1).lower())
+            continue
+        pattern = GFWLIST_REGEX.match(line)
+        if pattern:
+            try:
+                re.compile(pattern.group(1))
+            except re.error:
+                skipped += 1
+                continue
+            regexes.add(pattern.group(1))
+            continue
+        skipped += 1
+    return domains, exceptions, regexes, skipped
+
+
+def fetch_url(url, proxy):
+    """Fetch URL, optionally through PROXY (curl understands socks5h://)."""
+    command = ["curl", "-fsSL", "--max-time", "60"]
+    if proxy:
+        command += ["--proxy", proxy]
+    command.append(url)
+    try:
+        finished = subprocess.run(command, capture_output=True, check=False)
+    except FileNotFoundError:
+        with urllib.request.urlopen(url, timeout=30) as response:
+            return response.read().decode("utf-8", "replace")
+    if finished.returncode != 0:
+        message = finished.stderr.decode("utf-8", "replace").strip()
+        raise RuntimeError(message or f"curl exited {finished.returncode}")
+    return finished.stdout.decode("utf-8", "replace")
+
+
+def load_subscriptions(profile, warnings, proxy=None):
+    """Fetch the profile's enabled rule subscriptions."""
+    domains, exceptions, regexes = set(), set(), set()
+    names = []
+    for sub in profile.get("rulesSubscriptions") or []:
+        if sub.get("enabled") is False:
+            continue
+        url = sub.get("url")
+        if not url:
+            continue
+        try:
+            payload = fetch_url(url, proxy)
+        except Exception as error:  # noqa: BLE001 - reported, not fatal
+            warnings.add(f"subscription {sub.get('name')}: {error}")
+            continue
+        text = decode_subscription(payload) if str(sub.get("obfuscation", "")).lower() == "base64" else payload
+        found, denied, patterns, skipped = parse_subscription(text)
+        names.append(f"{sub.get('name') or url}: {len(found)} domains, "
+                     f"{len(denied)} exceptions, {len(patterns)} regexes"
+                     + (f", {skipped} skipped" if skipped else ""))
+        domains |= found
+        exceptions |= denied
+        regexes |= patterns
+    return domains, exceptions, regexes, names
+
+
+def js_table(name, values):
+    if not values:
+        return ""
+    body = ",\n".join(f'  {js(value)}: 1' for value in sorted(values))
+    return f"var {name} = {{\n{body}\n}};\n"
+
+
+def build_pac(backup, profile, source, default_is_direct, proxy=None):
     warnings = set()
+    sub_domains, sub_exceptions, sub_regexes, sub_names = load_subscriptions(profile, warnings, proxy)
     servers = servers_by_id(backup)
     default_id = backup.get("defaultProxyServerId")
     lines = []
@@ -192,6 +302,29 @@ def build_pac(backup, profile, source, default_is_direct):
         lines.append(f"  if ({expression}) return {js(target)};")
         emitted += 1
 
+    sub_proxy = directive(servers.get(profile.get("profileProxyServerId")) or servers.get(default_id)) or "DIRECT"
+    subscription_js = js_table("chromelSubscriptions", sub_domains) + \
+        js_table("chromelSubscriptionExceptions", sub_exceptions)
+    subscription_checks = ""
+    if sub_exceptions:
+        subscription_checks += '  if (chromelInList(host, chromelSubscriptionExceptions)) return "DIRECT";\n'
+    if sub_domains:
+        subscription_checks += f'  if (chromelInList(host, chromelSubscriptions)) return {js(sub_proxy)};\n'
+    if sub_regexes:
+        patterns = " || ".join(f"new RegExp({js(p)}).test(url)" for p in sorted(sub_regexes))
+        subscription_checks += f"  if ({patterns}) return {js(sub_proxy)};\n"
+    helpers = ""
+    if sub_domains or sub_exceptions:
+        helpers = """// Suffix match against a table of domains: one lookup per label.
+function chromelInList(host, table) {
+  for (;;) {
+    if (Object.prototype.hasOwnProperty.call(table, host)) return true;
+    var dot = host.indexOf('.');
+    if (dot < 0) return false;
+    host = host.slice(dot + 1);
+  }
+}
+"""
     fallback = "DIRECT" if default_is_direct else (directive(servers.get(default_id)) or "DIRECT")
     body = "\n".join(lines)
     generated = datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
@@ -199,12 +332,14 @@ def build_pac(backup, profile, source, default_is_direct):
 // Source: {source}
 // Profile: {profile.get('profileName')} ({profile.get('profileId')})
 // Rules: {emitted} active, {skipped} skipped; unmatched hosts -> {fallback}
+// Subscriptions: {"; ".join(sub_names) if sub_names else "none"}
 //
 // Chromium reads this file once, when its browser process starts.
 
+{subscription_js}{helpers}
 function FindProxyForURL(url, host) {{
 {body}
-  return {js(fallback)};
+{subscription_checks}  return {js(fallback)};
 }}
 """
     return pac, emitted, skipped, warnings, authenticated
@@ -216,6 +351,11 @@ def main():
     parser.add_argument("backup", help="SmartProxy-FullBackup.json")
     parser.add_argument("-o", "--out", help="Write the PAC here (default: stdout)")
     parser.add_argument("--profile", help="Profile name or id (default: the active one)")
+    parser.add_argument("--fetch-proxy",
+                        help="Fetch subscriptions through this proxy "
+                             "(for example socks5h://127.0.0.1:7890)")
+    parser.add_argument("--no-subscriptions", action="store_true",
+                        help="Ignore rule subscriptions; keep the inline rules only")
     parser.add_argument("--default-proxy", action="store_true",
                         help="Route unmatched hosts through the default server "
                              "instead of DIRECT")
@@ -232,7 +372,8 @@ def main():
         raise SystemExit("The backup contains no profiles")
 
     pac, emitted, skipped, warnings, authenticated = build_pac(
-        backup, profile, args.backup, default_is_direct=not args.default_proxy)
+        backup, profile, args.backup, default_is_direct=not args.default_proxy,
+        proxy=None if args.no_subscriptions else args.fetch_proxy)
 
     if args.out:
         with open(args.out, "w", encoding="utf-8") as handle:
@@ -253,6 +394,8 @@ def main():
         print("warning: CIDR rules call isInNet, which needs synchronous DNS and "
               "is unreliable in Chromium", file=sys.stderr)
     for note in sorted(w for w in warnings if w.startswith("unknown")):
+        print(f"warning: {note}", file=sys.stderr)
+    for note in sorted(w for w in warnings if w.startswith("subscription")):
         print(f"warning: {note}", file=sys.stderr)
 
 

@@ -17,6 +17,9 @@
 
 ### 交互
 
+- 代理：`chromel-proxy-pac-file` 接 PAC（文件由内置回环服务提供，因为本构建不读 `file://`）。
+- `scripts/smartproxy-to-pac.py` 展开 SmartProxy 的规则订阅（如 `gfwlist`），`--fetch-proxy` 抓取、`--no-subscriptions` 跳过。
+
 - 代理可用 PAC 配置：`chromel-proxy-pac-file` 指向 PAC 文件或 URL（`--proxy-pac-url`）。Chromium 只在启动时读一次，改完要重启 Emacs；`file://` PAC 在这个构建里取不到，所以文件路径由 Chromel 在 `127.0.0.1` 上临时提供一个只读 HTTP 服务。`scripts/smartproxy-to-pac.py` 可以把 SmartProxy 备份直接转成 PAC。
 - 权限请求有了回应：通知、地理位置、摄像头/麦克风、剪贴板读取等由 `CefPermissionHandler` 接住，在回显区问一句 `Allow <origin> to use <name>?`，答案按「来源 + 权限」记住到本次会话结束；`chromel-permission-policy` 可以预置放行/拒绝。以前这些请求在 Alloy 风格下落到默认处理 = 静默拒绝。
 - 下载不再被静默丢弃：`:download` 交给原生下载处理器，文件落到 `chromel-download-directory`（默认 `~/Downloads`），重名自动加 ` (1)`，模式行显示百分比，完成后在回显区报告路径。没有下载搁架，也没有"另存为"对话框——Emacs 不做那个 UI。
