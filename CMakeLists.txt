@@ -28,7 +28,7 @@ list(APPEND CMAKE_MODULE_PATH "${CEF_ROOT}/cmake")
 find_package(CEF REQUIRED)
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 
-add_library(chromel_core STATIC native/chromel_core.mm native/page.mm)
+add_library(chromel_core STATIC native/chromel_core.mm native/page.mm native/settings.mm)
 target_include_directories(chromel_core PUBLIC "${CEF_ROOT}" native
   "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(chromel_core PRIVATE -fobjc-arc -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)

@@ -6,7 +6,7 @@
 
 - Elisp 入口：`chromel.el`
 - Emacs 模块：`native/module.mm`
-- 宿主/浏览器层：`native/chromel_core.mm`（编排）、`native/page.h`/`page.mm`（页面结构与两张 id→对象表）、`native/helper.cc`、`native/hints.js`、`native/scroll.js`
+- 宿主/浏览器层：`native/chromel_core.mm`（编排）、`native/page.h`/`page.mm`（页面结构与两张 id→对象表）、`native/settings.h`/`settings.mm`（Chrome 管理窗口）、`native/helper.cc`、`native/hints.js`、`native/scroll.js`
 
 ---
 
