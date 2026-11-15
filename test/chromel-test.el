@@ -671,3 +671,57 @@
         (delete-process chromel--pac-server))
       (setq chromel--pac-server nil)
       (delete-file file))))
+
+(ert-deftest chromel-blocklist-blocks-hosts-and-respects-allow ()
+  (skip-unless (chromel-test--module-available-p))
+  (chromel--ensure-module)
+  (let ((file (make-temp-file "chromel-bl" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "# chromel-blocklist 1\n"
+                    "b\t0\t\th=ads.example.com\n"
+                    "a\t0\t\th=safe.ads.example.com\n"))
+          (chromel--native-blocklist-load file)
+          (should (chromel--native-blocklist-blocks "http://ads.example.com/x.js" 3 ""))
+          (should-not (chromel--native-blocklist-blocks "http://safe.ads.example.com/x.js" 3 "")))
+      (delete-file file))))
+
+(ert-deftest chromel-blocklist-smells-host-case-and-port ()
+  (skip-unless (chromel-test--module-available-p))
+  (chromel--ensure-module)
+  (let ((file (make-temp-file "chromel-bl" nil ".txt")))
+    (unwind-protect
+        (progn (with-temp-file file (insert "b\t0\t\th=ads.example.com\n"))
+               (chromel--native-blocklist-load file)
+               (should (chromel--native-blocklist-blocks "http://Ads.Example.COM:8080/a" 4 "")))
+      (delete-file file))))
+
+(ert-deftest chromel-blocklist-honours-resource-types ()
+  (skip-unless (chromel-test--module-available-p))
+  (chromel--ensure-module)
+  (let ((file (make-temp-file "chromel-bl" nil ".txt")))
+    (unwind-protect
+        (progn (with-temp-file file (insert (format "b\t%x\t\th=ads.example.com\n" (ash 1 3))))
+               (chromel--native-blocklist-load file)
+               (should (chromel--native-blocklist-blocks "http://ads.example.com/a.js" 3 ""))
+               (should-not (chromel--native-blocklist-blocks "http://ads.example.com/a.png" 4 "")))
+      (delete-file file))))
+
+(ert-deftest chromel-blocklist-maps-cef-types-onto-mask-bits ()
+  (skip-unless (chromel-test--module-available-p))
+  (chromel--ensure-module)
+  (let ((file (make-temp-file "chromel-bl" nil ".txt")))
+    (unwind-protect
+        (progn
+          ;; bit 7 is XHR in the converter's order; CEF calls that type 13.
+          (with-temp-file file (insert (format "b\t%x\t\th=ads.example.com\n" (ash 1 7))))
+          (chromel--native-blocklist-load file)
+          (should (chromel--native-blocklist-blocks "http://ads.example.com/api" 13 ""))
+          (should-not (chromel--native-blocklist-blocks "http://ads.example.com/pre" 11 "")))
+      (delete-file file))))
+
+(ert-deftest chromel-blocklist-missing-file-reports-an-error ()
+  (skip-unless (chromel-test--module-available-p))
+  (chromel--ensure-module)
+  (should-error (chromel--native-blocklist-load "/nonexistent/blocklist.txt")))
