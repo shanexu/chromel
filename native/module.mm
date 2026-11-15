@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #import <Foundation/Foundation.h>
 #include <emacs-module.h>
+#include "blocklist.h"
 #include "chromel_core.h"
 #include "downloads.h"
 #include "permissions.h"
@@ -32,7 +33,7 @@ emacs_value signalText(emacs_env* env, const char* text) {
   env->non_local_exit_signal(env, env->intern(env, "error"), list);
   return env->intern(env, "nil");
 }
-enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory, PermissionReply, SetProxyPac };
+enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory, PermissionReply, SetProxyPac, BlocklistLoad, BlocklistSetExceptions, BlocklistInfo, BlocklistBlocks };
 emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexcept {
  @autoreleasepool {
   emacs_value nilValue = env->intern(env, "nil");
@@ -46,7 +47,9 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
     int64_t numbers[6] = {};
     if (op == Init) { first = string(0); second = string(1); }
     if (op == Bind || op == IsSettingsUrl || op == SetDownloadDirectory ||
-        op == SetProxyPac) first = string(0);
+        op == SetProxyPac || op == BlocklistLoad || op == BlocklistSetExceptions)
+      first = string(0);
+    if (op == BlocklistBlocks) { first = string(0); numbers[0] = integer(1); second = string(2); }
     if (op == Create) { numbers[0] = integer(0); first = string(1); }
     if (op == Layout) for (int i = 0; i < 6; ++i) numbers[i] = integer(i);
     if (op == Hide || op == Command || op == Inspect) numbers[0] = integer(0);
@@ -76,6 +79,13 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
       case PumpPending: return env->make_integer(env, chromel::pump_pending() ? 1 : 0);
       case SetDownloadDirectory: chromel::set_download_directory(first); break;
       case SetProxyPac: chromel::set_proxy_pac(first); break;
+      case BlocklistLoad: chromel::load_blocklist(first); break;
+      case BlocklistSetExceptions: chromel::set_blocklist_exceptions(first); break;
+      case BlocklistInfo: return result(env, chromel::blocklist_summary());
+      case BlocklistBlocks:
+        return chromel::blocklist_blocks(first, static_cast<int>(numbers[0]), second)
+                   ? env->intern(env, "t")
+                   : nilValue;
     }
     return env->intern(env, "t");
   } catch (const std::exception& error) {
@@ -112,6 +122,10 @@ extern "C" int emacs_module_init(emacs_runtime* runtime) noexcept {
     {"set-download-directory", 1, SetDownloadDirectory, "Choose where downloads are written."},
     {"set-proxy-pac", 1, SetProxyPac, "Point Chromium at a PAC file; empty disables. Next start only."},
     {"permission-reply", 2, PermissionReply, "Answer a parked permission prompt: id, allow or deny."},
+    {"blocklist-load", 1, BlocklistLoad, "Load the host blocklist snapshot at PATH."},
+    {"blocklist-set-exceptions", 1, BlocklistSetExceptions, "Set the newline separated hosts that are never blocked."},
+    {"blocklist-info", 0, BlocklistInfo, "Return 'rules=N blocked=M' for the loaded blocklist."},
+    {"blocklist-blocks", 3, BlocklistBlocks, "Return non-nil when URL, of CEF resource TYPE, is blocked for INITIATOR."},
     {"bundle-path", 0, BundlePath, "Return the bundle this process runs in."},
     {"pump-pending", 0, PumpPending, "Return 1 when CEF has work scheduled for the message loop."},
     {"inspect", 1, Inspect, "Return actual Cocoa geometry and focus state of browser ID as JSON."},
