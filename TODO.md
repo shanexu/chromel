@@ -39,8 +39,11 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 ### A5 ✅ CMake 缺省项
 已补 `CMAKE_OSX_DEPLOYMENT_TARGET=13.0` 与默认 `CMAKE_BUILD_TYPE=Release`（均仅在未设置时生效）。裸配置后 `CMakeCache.txt` 确认 `Release` / `13.0`，编译标志含 `-mmacosx-version-min=13.0 -O3 -DNDEBUG`，重编 `chromel_core.mm` 零警告。
 
-### A6 smoke 二进制未接线
-`build/chromel-smoke` 依赖 `NSBundle.mainBundle`，无法独立运行（报 "CEF helper missing; run scripts/build.sh"），且 `test-gui.py` 从不调用它。**做法**：要么嵌入 `EmacsChromel.app` 里运行，要么删掉并以 GUI 测试为准。
+### A6 ✅ 原生冒烟接线并可独立运行
+根因不是"要嵌进 Emacs"：CEF 的 sandbox 检查要求 framework 位于**运行中的 app bundle** 内，而 `build/chromel-smoke` 在 `build/` 里裸跑，`NSBundle.mainBundle` 就是 `build/`。
+做法：CMake 直接把冒烟宿主链接到 `ChromelRuntime.app/Contents/MacOS/ChromelRuntime`（`package.py` 不再拷贝，只校验存在），于是 `NSBundle.mainBundle` 就是那个带 framework 与 5 个 helper 的 bundle。
+接线：`scripts/test-gui.py` 在拉起 19 个 GUI Emacs 之前先跑它（独立临时 profile，要求 `rc=0` 且输出含 `PASS:`），构建目标里也加上 `chromel-smoke`，避免用旧二进制跑绿。
+**验证**：`build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test "$TMPDIR/x"` 输出 `PASS: renderer, navigation, layout, cross-window reparenting, hide, close, shutdown`；完整套件 `python3 scripts/test-gui.py` → `rc=0`，20 项全绿。
 
 ## B. 架构
 

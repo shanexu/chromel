@@ -31,6 +31,9 @@
 
 ### 测试与构建
 
+- 原生冒烟宿主改为直接构建进 `ChromelRuntime.app/Contents/MacOS/ChromelRuntime`，可以脱离 Emacs 单独运行；`scripts/test-gui.py` 现在先跑它再拉起 19 个 GUI 进程（共 20 项）。
+
+
 - GUI 套件启动前先构建 `chromel-module`；编译失败立即退出，避免用上一次的 dylib 跑出假绿。
 - `gui-features` 的点击坐标避开视口右侧 16 px 的滚动条死区（`elementFromPoint` 实测 543/544 分界）。
 - test mode 关闭 Chromium 的后台/遮挡节流；合成 Escape 先激活 App 再投递并重试，消除全屏下的偶发失败与输入法崩溃。
