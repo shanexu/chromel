@@ -298,6 +298,15 @@ python3 scripts/smartproxy-to-pac.py ~/Downloads/SmartProxy-FullBackup.json \
 
 生成的文件头会写明来源、profile 和生效规则数；`--profile` 换一个 profile，`--default-proxy` 让未匹配的主机也走默认服务器。
 
+备份里的**规则订阅**（SmartProxy 的 `gfwlist` 之类）也会展开——订阅只存 URL 不存规则，所以生成时要联网抓一次：
+
+```sh
+python3 scripts/smartproxy-to-pac.py ~/Downloads/SmartProxy-FullBackup.json \
+    -o ~/chromel/proxy.pac --fetch-proxy socks5h://127.0.0.1:7890
+```
+
+`--fetch-proxy` 走本地代理抓订阅（`socks5h://` 表示让代理解析域名），抓不到就告警并只保留手写规则；`--no-subscriptions` 跳过订阅。展开的域名写成一个表，按域名后缀逐级查表，所以四千多条规则也不会让每个请求变慢。
+
 Chromium 只在浏览器进程启动时读一次 PAC，所以**改完要重启 Emacs**：CEF 没有 `chrome.proxy` 的等价物，运行时换规则做不到。另外，这个构建不会去取 `file://` 的 PAC（失败后静默退回直连），所以给文件路径时由 Chromel 在 `127.0.0.1` 上起一个只回答 `/proxy.pac` 的临时 HTTP 服务喂给 Chromium；直接给 `http(s)://` 地址则原样使用。
 
 几点边界：PAC 是进程级的，设置窗口和 DevTools 一样走它；脚本里拿不到凭据，需要认证的代理会收到 407；Chromium 调用脚本前会裁掉 https 的 path，路径类规则只对 http 有效。
