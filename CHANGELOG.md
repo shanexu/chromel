@@ -17,6 +17,7 @@
 
 ### 交互
 
+- 权限请求有了回应：通知、地理位置、摄像头/麦克风、剪贴板读取等由 `CefPermissionHandler` 接住，在回显区问一句 `Allow <origin> to use <name>?`，答案按「来源 + 权限」记住到本次会话结束；`chromel-permission-policy` 可以预置放行/拒绝。以前这些请求在 Alloy 风格下落到默认处理 = 静默拒绝。
 - 下载不再被静默丢弃：`:download` 交给原生下载处理器，文件落到 `chromel-download-directory`（默认 `~/Downloads`），重名自动加 ` (1)`，模式行显示百分比，完成后在回显区报告路径。没有下载搁架，也没有"另存为"对话框——Emacs 不做那个 UI。
 - `s` 归还页内搜索，Chrome Web Store 移到 `E`（`C-c w E`）；README 与 Meow 测试同步。
 - 20 ms 定时器按需启停：没有页面时先运行 2 秒宽限期再停，新建页面重新起泵。

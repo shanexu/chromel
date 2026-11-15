@@ -308,7 +308,17 @@ kill-emacs → chromel--shutdown → native-shutdown
 
 两个容易踩的浏览器行为：同一页面第二次由脚本触发的下载会被 Chromium 以"多重自动下载"静默拒绝（需要用户手势，测试里用一次真实点击）；并且**刚完成下载的页面不再执行脚本和导航**，所以测试的第二份下载来自一个新标签页。
 
-### 4.14 持久化
+### 4.14 权限请求
+
+两个入口，都在 browser process 的 UI 线程：`CefPermissionHandler::OnRequestMediaAccessPermission`（getUserMedia 的摄像头/麦克风，`CefMediaAccessCallback`）与 `OnShowPermissionPrompt`（其余，`CefPermissionPromptCallback`）。两者都是"返回 true 并稍后调用回调"，返回 false 就走默认处理——Alloy 风格下默认是**拒绝**（`CEF_PERMISSION_RESULT_IGNORE`），所以没写 handler 时网页看到的永远是"用户拒绝"。
+
+回调必须恰好执行一次，而 Emacs 要问人。`native/permissions.mm` 把回调连同 origin、权限名一起停在一个 `unordered_map<uint64_t, Pending>` 里，emit 一条 `permission` 事件（`{id, origin, permissions:[…]}`），等 Elisp 用 `chromel--native-permission-reply` 回来再执行。停靠期间渲染进程只是等待，泵停不停都不影响它；真正需要注意的是 `shutdown()` 前必须 `cancel_prompts()`，否则回调会挂在已经拆掉的 browser 上。
+
+媒体请求的放行不是布尔值：`CefMediaAccessCallback::Continue` 要求把 `requested_permissions` 的位原样回传，所以 `Pending` 同时存 `mediaBits`。普通提示用 `CEF_PERMISSION_RESULT_ACCEPT` / `DENY`。
+
+一次请求只有一个回调，因此 Elisp 的决策是"整条请求"级别的：只要有一项被策略拒绝，就整条 `deny`；否则把所有 `ask` 的类型合并成一句问题问一次。`OnDismissPermissionPrompt`（导航、关页、Chromium 自己回答）来的时候只需丢掉停靠的回调，不要再回答。
+
+### 4.15 持久化
 
 数据目录默认 `~/chromel/`（可用 `chromel-data-directory` 覆盖）：
 
@@ -399,7 +409,7 @@ Emacs.app/Contents/
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 21 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃与下载等；加上原生冒烟共 22 项。
+GUI 套件共 22 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃、下载与权限等；加上原生冒烟共 23 项。
 
 `CHROMEL_TEST_ONLY=a.el,b.el` 可只跑子集（原生冒烟总会先跑）。但 fixture 的标题在同一个 profile 里第一次是 `…-ready`、之后才是 `…-restored`，所以过滤掉"播种"的那一条会让 `…-restored` 永远等不到标题。`test-gui.py` 检测到筛选后的第一条不是播种测试时，会自动在前面补一条 `gui-smoke.el`。
 

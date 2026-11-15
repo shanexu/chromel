@@ -2,7 +2,7 @@
 
 快照：2026-11-15，分支 `topic/renderer-crash`（基于 `master` `0d078ed`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 39/39，`python3 scripts/test-gui.py` 22/22 全绿。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 43/43，`python3 scripts/test-gui.py` 23/23 全绿。
 
 ## 已完成（本轮）
 
@@ -154,6 +154,14 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ### C5 ✅ 泵的空闲判定改问 native
 `chromel_core.h` 新增 `int browser_count();`（只读 `browsers` + `settingsBrowsers`，**不**经 `requireReady`，CEF 未初始化时返回 0）；模块导出 `chromel--native-browser-count`；Elisp 新增 `chromel--native-has-browsers-p`，`chromel--pump-needed-p` 用它取代原先永不重置的 `chromel--settings-open`（该变量已删除）。`chromel-settings` 改为「先发 settings 命令、再 `chromel--ensure-timer`」，因为窗口是在那条命令里同步创建的。API 版本随之升到 2。ERT 新增 2 条并更新 2 条（无页面/无浏览器时停泵、设置窗口存在时继续泵、模块未加载时不问 native）。
 
+### C8 ✅ 权限请求无声拒绝
+
+`Client` 之前没实现 `CefPermissionHandler`，于是通知、地理位置、摄像头/麦克风、剪贴板读取在 Alloy 风格下落到默认处理 = `CEF_PERMISSION_RESULT_IGNORE`，网页只会看到"用户拒绝"，用户什么也没看到。
+
+现在 `native/permissions.mm` 停靠回调并上报 `permission` 事件，Elisp 在回显区问 `Allow <origin> to use <name>? (y or n)`，答案按「来源 + 权限名」记在本次会话的 `chromel--permission-answers` 里；`chromel-permission-policy` 可预置 `allow`/`deny`。策略拒绝会拒绝整条请求（一个回调只有一个答案），媒体请求按 `mediaBits` 原样回传。
+
+验证：`test/gui-permission.el` 打开一个调 `Notification.requestPermission()` 的页面，断言"问了一次 → granted"、"第二次同来源不再问 → granted"。顺手确认了 `y-or-n-p` 在定时器回调里可用（CEF 泵在等待期间停摆无害，渲染进程本来就在等这个回调）。
+
 ### C7 ✅ 下载被静默丢弃
 
 `CefDownloadHandler` 之前根本没实现，附件导航在 Alloy 下退回默认处理 = 取消，页面看起来"点了没反应"。现在 `native/downloads.mm` 决定路径（`chromel-download-directory`，默认 `~/Downloads`）、按 `name (1).ext` 避让重名、按 percent 去重上报进度；Elisp 在模式行显示百分比、在回显区报告结果。`test/gui-download.el` 覆盖"下载落地 + 内容正确 + 同名不覆盖"。
@@ -178,7 +186,7 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ```bash
 ./scripts/build.sh                       # 0 warning
 emacs --batch -L . -L test -l test/chromel-test.el -f ert-run-tests-batch-and-exit
-python3 scripts/test-gui.py              # 22 项，约 5 分钟，会抢焦点
+python3 scripts/test-gui.py              # 23 项，约 5 分钟，会抢焦点
 CHROMEL_TEST_ONLY=smoke,hints python3 scripts/test-gui.py   # 子集
 ```
 

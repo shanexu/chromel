@@ -566,3 +566,69 @@
       (should (equal chromel--status ""))
       (should (null chromel--download-percent))))
   (should (string-match-p "No download directory" chromel-test--reported)))
+
+(defun chromel-test--permission-payload (id origin names)
+  (json-serialize (list :id id :origin origin :permissions (vconcat names))))
+
+(ert-deftest chromel-permission-policy-answers-without-asking ()
+  "A policy answer never reaches the prompt."
+  (let ((chromel-permission-policy '(("location" . deny)))
+        (asked nil)
+        (replies nil))
+    (cl-letf (((symbol-function 'chromel--permission-ask)
+               (lambda (&rest _) (setq asked t) t))
+              ((symbol-function 'chromel--native-permission-reply)
+               (lambda (id decision) (push (cons id decision) replies))))
+      (chromel--permission-request
+       (chromel-test--permission-payload 11 "https://example.org" '("location"))))
+    (should-not asked)
+    (should (equal replies '((11 . "deny"))))))
+
+(ert-deftest chromel-permission-asks-once-then-remembers ()
+  "The first request prompts; the same origin and name are not asked twice."
+  (let ((chromel-permission-policy nil)
+        (asked 0)
+        (replies nil))
+    (clrhash chromel--permission-answers)
+    (cl-letf (((symbol-function 'chromel--permission-ask)
+               (lambda (&rest _) (cl-incf asked) t))
+              ((symbol-function 'chromel--native-permission-reply)
+               (lambda (id decision) (push (cons id decision) replies))))
+      (chromel--permission-request
+       (chromel-test--permission-payload 1 "https://example.org" '("notifications")))
+      (chromel--permission-request
+       (chromel-test--permission-payload 2 "https://example.org" '("notifications"))))
+    (should (= asked 1))
+    (should (equal (nreverse replies) '((1 . "allow") (2 . "allow"))))))
+
+(ert-deftest chromel-permission-remembers-a-refusal ()
+  "Saying no is remembered too, so the page stops nagging."
+  (let ((chromel-permission-policy nil)
+        (asked 0)
+        (replies nil))
+    (clrhash chromel--permission-answers)
+    (cl-letf (((symbol-function 'chromel--permission-ask)
+               (lambda (&rest _) (cl-incf asked) nil))
+              ((symbol-function 'chromel--native-permission-reply)
+               (lambda (id decision) (push (cons id decision) replies))))
+      (chromel--permission-request
+       (chromel-test--permission-payload 5 "https://example.org" '("camera")))
+      (chromel--permission-request
+       (chromel-test--permission-payload 6 "https://example.org" '("camera"))))
+    (should (= asked 1))
+    (should (equal (nreverse replies) '((5 . "deny") (6 . "deny"))))))
+
+(ert-deftest chromel-permission-policy-denial-refuses-the-whole-request ()
+  "One denied name cannot be split out of a single callback, so all of it is denied."
+  (let ((chromel-permission-policy '(("camera" . deny)))
+        (asked nil)
+        (replies nil))
+    (clrhash chromel--permission-answers)
+    (cl-letf (((symbol-function 'chromel--permission-ask)
+               (lambda (&rest _) (setq asked t) t))
+              ((symbol-function 'chromel--native-permission-reply)
+               (lambda (id decision) (push (cons id decision) replies))))
+      (chromel--permission-request
+       (chromel-test--permission-payload 9 "https://example.org" '("camera" "microphone"))))
+    (should-not asked)
+    (should (equal replies '((9 . "deny"))))))

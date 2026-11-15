@@ -108,6 +108,19 @@ Kept so the timer is rebuilt only when the rate actually changes.")
 (defvar chromel--download-percent nil
   "Last reported download percent.
 Identical progress reports leave the mode line alone.")
+
+(defcustom chromel-permission-policy nil
+  "Permissions answered without asking, keyed by the name Chromel shows.
+Names come from the backend, e.g. \"location\", \"notifications\",
+\"camera\", \"microphone\", \"clipboard\", \"pointer lock\".  A value of
+`allow' grants the request silently, `deny' refuses it silently; anything
+unlisted is asked once per origin and then remembered for the session."
+  :type '(alist :key-type string
+                :value-type (choice (const allow) (const deny))))
+
+(defvar chromel--permission-answers (make-hash-table :test #'equal)
+  "Answers already given, keyed by \"ORIGIN|NAME\".")
+
 (defvar chromel--quiet-ticks 0
   "Consecutive pumps CEF had nothing for.  Slowing down needs a run of them:
 flapping between 20 ms and 250 ms re-creates the timer and, with it, an
@@ -344,6 +357,7 @@ native side has finished tearing them down; pumping must continue until then.")
            (chromel-find-clear)
            (chromel--command "navigate" (chromel--crash-page value)))
           ("download" (chromel--download-event value))
+          ("permission" (chromel--permission-request value))
           ("focus"
            (when (and (window-live-p chromel--window) (not (active-minibuffer-window)))
              (select-window chromel--window)))
@@ -699,8 +713,9 @@ not create a browser tab."
 (declare-function chromel--native-is-settings-url "chromel-module" (url))
 (declare-function chromel--native-api-version "chromel-module" ())
 (declare-function chromel--native-set-download-directory "chromel-module" (directory))
+(declare-function chromel--native-permission-reply "chromel-module" (id decision))
 
-(defconst chromel-module-api-version 5
+(defconst chromel-module-api-version 6
   "API version this file expects from `chromel-native-module'.
 Bump together with `chromel::kChromelApiVersion' whenever a
 `chromel--native-*' signature or meaning changes.")
@@ -899,6 +914,49 @@ settings through `current-kill', just as `yank' does."
     (unless index (user-error "This is not a live Chromel buffer"))
     (when (kill-buffer source)
       (when (and next (memq next (chromel--buffers))) (chromel--select-buffer next)))))
+
+(defun chromel--permission-decision (origin name)
+  "Return `allow', `deny' or `ask' for NAME requested by ORIGIN.
+
+An answer given earlier this session wins over `chromel-permission-policy',
+because the person in front of the screen just said it."
+  (let ((answer (gethash (concat origin "|" name) chromel--permission-answers 'missing)))
+    (if (not (eq answer 'missing))
+        (if answer 'allow 'deny)
+      (or (cdr (assoc name chromel-permission-policy)) 'ask))))
+
+(defun chromel--permission-ask (origin names)
+  "Ask whether ORIGIN may use NAMES; return non-nil when allowed."
+  (y-or-n-p (format "Allow %s to use %s? " origin (string-join names " and "))))
+
+(defun chromel--permission-request (value)
+  "Answer a backend permission request described by JSON VALUE.
+
+The callback is parked natively, so this may take as long as the question
+takes; answering \"deny\" is always safe."
+  (let* ((request (ignore-errors (json-parse-string value :object-type 'plist)))
+         (id (plist-get request :id))
+         (origin (or (plist-get request :origin) "this page"))
+         (names (append (plist-get request :permissions) nil)))
+    (when (and (integerp id) names)
+      (let ((asked nil) (denied nil))
+        (dolist (name names)
+          (pcase (chromel--permission-decision origin name)
+            ('allow nil)
+            ('deny (push name denied))
+            (_ (push name asked))))
+        (setq asked (nreverse asked))
+        ;; One callback answers the whole request, so a single policy denial
+        ;; refuses all of it rather than granting the rest.
+        (if denied
+            (progn
+              (message "Chromel: denied %s for %s"
+                       (string-join (nreverse denied) ", ") origin)
+              (chromel--native-permission-reply id "deny"))
+          (let ((allow (or (null asked) (chromel--permission-ask origin asked))))
+            (dolist (name asked)
+              (puthash (concat origin "|" name) (and allow t) chromel--permission-answers))
+            (chromel--native-permission-reply id (if allow "allow" "deny"))))))))
 
 (defun chromel--download-event (value)
   "Report a download the backend started or finished, from JSON VALUE.
