@@ -2,7 +2,7 @@
 
 快照：2026-11-15，分支 `topic/renderer-crash`（基于 `master` `0d078ed`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 37/37，`python3 scripts/test-gui.py` 21/21 全绿。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 39/39，`python3 scripts/test-gui.py` 22/22 全绿。
 
 ## 已完成（本轮）
 
@@ -154,6 +154,12 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ### C5 ✅ 泵的空闲判定改问 native
 `chromel_core.h` 新增 `int browser_count();`（只读 `browsers` + `settingsBrowsers`，**不**经 `requireReady`，CEF 未初始化时返回 0）；模块导出 `chromel--native-browser-count`；Elisp 新增 `chromel--native-has-browsers-p`，`chromel--pump-needed-p` 用它取代原先永不重置的 `chromel--settings-open`（该变量已删除）。`chromel-settings` 改为「先发 settings 命令、再 `chromel--ensure-timer`」，因为窗口是在那条命令里同步创建的。API 版本随之升到 2。ERT 新增 2 条并更新 2 条（无页面/无浏览器时停泵、设置窗口存在时继续泵、模块未加载时不问 native）。
 
+### C7 ✅ 下载被静默丢弃
+
+`CefDownloadHandler` 之前根本没实现，附件导航在 Alloy 下退回默认处理 = 取消，页面看起来"点了没反应"。现在 `native/downloads.mm` 决定路径（`chromel-download-directory`，默认 `~/Downloads`）、按 `name (1).ext` 避让重名、按 percent 去重上报进度；Elisp 在模式行显示百分比、在回显区报告结果。`test/gui-download.el` 覆盖"下载落地 + 内容正确 + 同名不覆盖"。
+
+顺带记两个浏览器的脾气：① 同一页面第二次脚本触发的下载会被"多重自动下载"拦掉，需要真实点击（测试里第二份来自新标签页 + 点击）；② 刚交付过下载的页面不再执行脚本或导航，所以复用它做后续断言会看到"没有任何事件"。
+
 ### C6 ✅ 渲染进程崩溃后只剩空白页
 渲染进程死掉时（内存耗尽、SIGSEGV、`kill -9`），Elisp 侧原先只能看到"不再有新事件"，页面冻结在白屏，用户没有任何提示。
 现在 `Client::OnRenderProcessTerminated` 上报 `crashed`（`{status, code, message}`），Elisp 记住崩溃前的 URL、清掉 find 状态，并把标签导航到一个 `data:text/html` 错误页（"The page crashed / Renderer exited (status 9, code 0) / Press r to reload …"）；`r`（`chromel-reload`）在有崩溃标记时导航回原 URL 并清标记，`mode-line-process` 期间固定显示 `Crashed`。
@@ -172,7 +178,7 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ```bash
 ./scripts/build.sh                       # 0 warning
 emacs --batch -L . -L test -l test/chromel-test.el -f ert-run-tests-batch-and-exit
-python3 scripts/test-gui.py              # 21 项，约 5 分钟，会抢焦点
+python3 scripts/test-gui.py              # 22 项，约 5 分钟，会抢焦点
 CHROMEL_TEST_ONLY=smoke,hints python3 scripts/test-gui.py   # 子集
 ```
 

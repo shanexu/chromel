@@ -4,7 +4,7 @@ Chromel 是 macOS 上的 Emacs 原生浏览器插件：一个网页对应一个 
 
 内部原理（三层结构、事件泵、焦点与键盘模型）见 [`docs/architecture.md`](docs/architecture.md)。
 
-首个版本提供网页浏览、导航、独立 profile、Chromium 设置页、浏览历史和 DevTools，支持手动添加密码后的自动填充，以及 Chrome Web Store 安装和扩展管理。普通网页嵌入 Emacs，设置和管理页面在独立窗口中打开。暂不支持 Chrome 同步、书签管理或下载管理。
+首个版本提供网页浏览、导航、独立 profile、Chromium 设置页、浏览历史和 DevTools，支持手动添加密码后的自动填充，以及 Chrome Web Store 安装和扩展管理。普通网页嵌入 Emacs，设置和管理页面在独立窗口中打开。下载直接落到 `chromel-download-directory`（没有下载搁架和下载管理界面），暂不支持 Chrome 同步或书签管理。
 
 提供 Vimium 风格的键位、关闭页面恢复、会话自动保存和延迟恢复。Meow 是可选适配，不需要安装即可使用全部浏览器键位。
 
@@ -248,6 +248,16 @@ Chromium 的启动页、搜索引擎等选项不会替代 `chromel-home-url`、E
 ```
 
 `C-c w S` 可随时立即保存。自动保存关闭时，该命令仍可手动保存。
+
+## 下载文件
+
+附件下载不会被丢弃：CEF 把下载交给原生处理器，文件直接写到 `chromel-download-directory`（默认 `~/Downloads`）。目录在第一次下载时才创建；同名文件不会覆盖，而是得到 `name (1).ext` 这样的新名字（数字一直加到空位为止）。模式行显示 `Downloading 42%`，完成后在回显区报告保存路径，失败或被取消时也会说明原因。
+
+```elisp
+(setq chromel-download-directory (expand-file-name "~/Downloads/chromel"))
+```
+
+改动只影响之后开始的下载，不需要重启，也不需要重新加载模块。没有下载搁架、下载列表或"另存为"对话框：想换目录就改这个变量，再点一次链接。页面里的 `target=_blank` 下载链接同样走这条路。
 
 ## 数据和能力边界
 

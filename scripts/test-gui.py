@@ -73,7 +73,23 @@ class Fixture(http.server.BaseHTTPRequestHandler):
         document.cookie = 'chromel-test=saved; Max-Age=3600; Path=/; SameSite=Lax';
         document.title = restored ? 'chromel-emacs-restored' : 'chromel-emacs-ready';
         </script>"""
-        if self.path == '/hint-target':
+        content_type = "text/html; charset=utf-8"
+        extra_headers = {}
+        if self.path.startswith('/download'):
+            # A real attachment: CEF hands it to the download handler instead of
+            # replacing the page, which is exactly what the test needs.
+            body = b"chromel download fixture\n"
+            content_type = "application/octet-stream"
+            extra_headers["Content-Disposition"] = 'attachment; filename="chromel-fixture.txt"'
+        elif self.path.startswith('/again'):
+            # A page whose whole top-left corner is a link to the attachment:
+            # Chromium only allows a second automatic download after a trusted
+            # click, and this gives the test one.
+            body = b"""<!doctype html><meta charset=utf-8><title>again-fixture</title>
+<style>html,body{margin:0;height:100%}a{position:fixed;left:0;top:0;width:160px;
+height:80px;display:block;background:#334;color:#fff;font:16px system-ui}</style>
+<a id="again" href="/download?again">download again</a>"""
+        elif self.path == '/hint-target':
             body = b"<!doctype html><meta charset=utf-8><title>hint-target</title><h1>Link followed</h1>"
         elif self.path == '/features':
             body = (root / 'test/features.html').read_text().replace('__OTHER__', f'http://localhost:{self.server.server_port}').encode()
@@ -98,7 +114,9 @@ class Fixture(http.server.BaseHTTPRequestHandler):
                 nested = f'<iframe id="nested" name="nested" src="{here}/scroll-frame/nested" style="position:fixed;left:0;top:60px;width:230px;height:150px;border:0"></iframe>' if self.path.endswith('/cross') else ''
                 body = body.replace('__NESTED__', nested).encode()
         self.send_response(200)
-        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Content-Type", content_type)
+        for name, header in extra_headers.items():
+            self.send_header(name, header)
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
@@ -133,6 +151,7 @@ try:
             ("password-restore", "gui-passwords.el"),
             ("management", "gui-management.el"),
             ("crash-fixture", "gui-crash.el"),
+            ("chromel-emacs-restored", "gui-download.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:

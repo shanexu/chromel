@@ -48,6 +48,12 @@ exactly one %s.  Examples:
   https://www.google.com/search?q=%s
   https://search.example.org/find?query=%s"
   :type '(string :tag "URL template containing %s"))
+(defcustom chromel-download-directory (expand-file-name "~/Downloads")
+  "Directory downloads are written to.
+Chromium has no download shelf here, so the backend saves the file with the
+name the page suggested and appends \" (1)\" instead of overwriting.  Changing
+this takes effect for the next download; no restart is needed."
+  :type 'directory)
 (defcustom chromel-allow-raw-javascript t
   "Allow the fire-and-forget JavaScript channel from Lisp.
 The `javascript' browser action runs a script on the main frame and discards
@@ -99,6 +105,9 @@ Held j/k use `chromel-scroll-speed` after the initial step."
 (defvar chromel--timer-delay nil
   "Interval the running pump was armed with.
 Kept so the timer is rebuilt only when the rate actually changes.")
+(defvar chromel--download-percent nil
+  "Last reported download percent.
+Identical progress reports leave the mode line alone.")
 (defvar chromel--quiet-ticks 0
   "Consecutive pumps CEF had nothing for.  Slowing down needs a run of them:
 flapping between 20 ms and 250 ms re-creates the timer and, with it, an
@@ -334,6 +343,7 @@ native side has finished tearing them down; pumping must continue until then.")
            (setq chromel--crashed t chromel--status "Crashed; r to retry")
            (chromel-find-clear)
            (chromel--command "navigate" (chromel--crash-page value)))
+          ("download" (chromel--download-event value))
           ("focus"
            (when (and (window-live-p chromel--window) (not (active-minibuffer-window)))
              (select-window chromel--window)))
@@ -688,8 +698,9 @@ not create a browser tab."
 
 (declare-function chromel--native-is-settings-url "chromel-module" (url))
 (declare-function chromel--native-api-version "chromel-module" ())
+(declare-function chromel--native-set-download-directory "chromel-module" (directory))
 
-(defconst chromel-module-api-version 4
+(defconst chromel-module-api-version 5
   "API version this file expects from `chromel-native-module'.
 Bump together with `chromel::kChromelApiVersion' whenever a
 `chromel--native-*' signature or meaning changes.")
@@ -705,8 +716,17 @@ build is not misreported as a bad URL.  Always returns non-nil."
        (user-error "Cannot load the Chromel native module %s: %s"
                    chromel-native-module (error-message-string err))))
     (setq chromel--module-loaded t)
-    (chromel--check-module-api))
+    (chromel--check-module-api)
+    (chromel--apply-download-directory))
   t)
+
+(defun chromel--apply-download-directory ()
+  "Tell the backend where downloads should land.
+Runs without CEF: the directory is just a setting the download handler reads
+when a download actually starts."
+  (when (fboundp 'chromel--native-set-download-directory)
+    (chromel--native-set-download-directory
+     (file-name-as-directory (expand-file-name chromel-download-directory)))))
 
 (defun chromel--check-module-api ()
   "Refuse to run against a dylib built for a different API version.
@@ -879,6 +899,33 @@ settings through `current-kill', just as `yank' does."
     (unless index (user-error "This is not a live Chromel buffer"))
     (when (kill-buffer source)
       (when (and next (memq next (chromel--buffers))) (chromel--select-buffer next)))))
+
+(defun chromel--download-event (value)
+  "Report a download the backend started or finished, from JSON VALUE.
+The file is already on disk: Chromium hands over the path, and there is no
+shelf to click, so the mode line carries the progress and the echo area the
+outcome."
+  (let* ((info (ignore-errors (json-parse-string value :object-type 'plist)))
+         (state (plist-get info :state))
+         (name (or (plist-get info :name) "download"))
+         (path (plist-get info :path)))
+    (pcase state
+      ("started"
+       (setq chromel--status "Downloading" chromel--download-percent nil)
+       (message "Chromel: downloading %s" name))
+      ("progress"
+       (let ((percent (plist-get info :percent)))
+         (when (and (integerp percent)
+                    (not (eql percent chromel--download-percent)))
+           (setq chromel--download-percent percent
+                 chromel--status (format "Downloading %d%%" percent)))))
+      ("completed"
+       (setq chromel--status "" chromel--download-percent nil)
+       (message "Chromel: saved %s" (or path name)))
+      ((or "cancelled" "interrupted" "failed")
+       (setq chromel--status "" chromel--download-percent nil)
+       (message "Chromel: download %s: %s" state
+                (or (plist-get info :reason) name))))))
 
 (defun chromel--crash-reason (detail)
   "Return one sentence explaining why the renderer died.

@@ -538,3 +538,31 @@
   (should (equal (chromel--crash-reason "{\"status\":8,\"code\":-3,\"message\":\"Oops\"}")
                  "Oops"))
   (should (equal (chromel--crash-reason "not json") "Renderer exited")))
+
+(ert-deftest chromel-download-events-drive-the-mode-line ()
+  (with-temp-buffer
+    (setq chromel--status "Loading" chromel--download-percent nil)
+    (chromel--download-event "{\"state\":\"started\",\"name\":\"a.txt\",\"path\":\"/tmp/a.txt\"}")
+    (should (equal chromel--status "Downloading"))
+    (chromel--download-event "{\"state\":\"progress\",\"name\":\"a.txt\",\"percent\":42}")
+    (should (equal chromel--status "Downloading 42%"))
+    (chromel--download-event "{\"state\":\"progress\",\"name\":\"a.txt\",\"percent\":42}")
+    (should (equal chromel--status "Downloading 42%"))
+    (chromel--download-event "{\"state\":\"completed\",\"name\":\"a.txt\",\"path\":\"/tmp/a.txt\"}")
+    (should (equal chromel--status ""))
+    (should (null chromel--download-percent))))
+
+(defvar chromel-test--reported nil)
+
+(ert-deftest chromel-download-failure-keeps-the-page-readable ()
+  (setq chromel-test--reported nil)
+  (cl-letf (((symbol-function 'message)
+             (lambda (format-string &rest args)
+               (setq chromel-test--reported (apply #'format format-string args)))))
+    (with-temp-buffer
+      (setq chromel--status "Downloading" chromel--download-percent 10)
+      (chromel--download-event
+       "{\"state\":\"failed\",\"name\":\"a.txt\",\"reason\":\"No download directory is configured\"}")
+      (should (equal chromel--status ""))
+      (should (null chromel--download-percent))))
+  (should (string-match-p "No download directory" chromel-test--reported)))
