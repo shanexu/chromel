@@ -356,7 +356,7 @@ kill-emacs → chromel--shutdown → native-shutdown
 
 计数在 `blocklist_blocks()` 里累加，`info()` 多输出一行 `Blocklist: rules=<n> blocked=<m>`；`chromel-blocker-status` 读的就是它。
 
-规则文件由 `scripts/ubol-to-blocklist.py` 生成（`data/README.md` 有抓取与再生成步骤），当前快照是 uBOL 的七套 ruleset（含 badware、urlhaus、pgl 与 AdGuard Chinese），109,619 条。第一版只保留域名类规则，路径/子串/正则计入 `dropped(pattern)`，`third-party`/`first-party` 标记忽略。
+规则文件由 `scripts/ubol-to-blocklist.py` 生成（`data/README.md` 有抓取与再生成步骤），当前快照是 uBOL 的九套 ruleset（含 badware、urlhaus、pgl 与 AdGuard 的中日韩列表），110,616 条。第一版只保留域名类规则，路径/子串/正则计入 `dropped(pattern)`，`third-party`/`first-party` 标记忽略。
 
 ---
 

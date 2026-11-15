@@ -156,7 +156,7 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 
 ### C10 ✅ 没有广告/追踪拦截
 
-Chromel 自带一份 uBOL 七套 ruleset 的编译快照（`data/blocklist.txt`，109,619 条域名规则），默认开启。`native/blocklist.mm` 在 IO 线程匹配 host 与发起站点，`Client::GetResourceRequestHandler` 返回 `RV_CANCEL`；`allow` 优先，`i=<suffix>` 限定发起站点，按站点例外存 `blocker.json`。测量：`--blocklist-bench` 20,000 次平均 **0.17 µs**/请求（门槛 20 µs）。
+Chromel 自带一份 uBOL 九套 ruleset 的编译快照（`data/blocklist.txt`，110,616 条域名规则），默认开启。`native/blocklist.mm` 在 IO 线程匹配 host 与发起站点，`Client::GetResourceRequestHandler` 返回 `RV_CANCEL`；`allow` 优先，`i=<suffix>` 限定发起站点，按站点例外存 `blocker.json`。测量：`--blocklist-bench` 20,000 次平均 **0.17 µs**/请求（门槛 20 µs）。
 
 已知不精确：只有域名规则（路径/子串/正则共 16,469 条被丢弃并计数）、忽略 `third-party` 标记（约 8 千条比原版激进）、没有元素隐藏。
 
