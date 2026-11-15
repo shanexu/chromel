@@ -70,7 +70,25 @@ bool pumping = false;
 std::unique_ptr<ChromelHostWakeup> hostWakeup;
 int nextId = 1;
 std::string profilePath;
-bool testMode = false;
+// Three separate promises that used to share one flag.  Naming them keeps the
+// production paths honest: "we are a test process" is not the same statement as
+// "do not show or focus windows" or "do not touch the real Keychain".
+struct TestSwitches {
+  bool enabled = false;      // CHROMEL_CEF_TEST_MODE=1: test-only commands exist
+  bool quietDesktop = false; // CHROMEL_CEF_TEST_QUIET: no Show/Activate/focus
+  bool hermetic = false;     // CHROMEL_CEF_TEST_HERMETIC: mock keychain, temp profile
+};
+TestSwitches testSwitches;
+
+bool envFlag(const char* name) {
+  const char* value = getenv(name);
+  return value && std::string(value) == "1";
+}
+
+// Test commands are not merely useless in production, they must be unreachable.
+void requireTestSwitches(const char* action) {
+  if (!testSwitches.enabled) throw std::runtime_error(std::string("Unknown browser action: ") + action);
+}
 char handlingEventKey;
 IMP originalSendEvent;
 std::vector<id> observers;
@@ -238,7 +256,7 @@ class App final : public CefApp, public CefBrowserProcessHandler {
                                      CefRefPtr<CefCommandLine> commandLine) override {
     // Test-only Chromium facility: never ask the user's Keychain to authorize
     // disposable, repeatedly re-signed test apps.  Production uses Keychain.
-    if (testMode && processType.empty()) {
+    if (testSwitches.hermetic && processType.empty()) {
       commandLine->AppendSwitch("use-mock-keychain");
       // The GUI harness stacks disposable windows behind the user's terminal.
       // Chromium throttles occluded windows, which made scripted navigation,
@@ -501,7 +519,8 @@ class SettingsClient final : public CefClient,
     }
   }
   bool OnSetFocus(CefRefPtr<CefBrowser>, FocusSource) override {
-    return testMode;  // Disposable GUI probes must not take the user's keyboard.
+    // Disposable GUI probes must not take the user's keyboard.
+    return testSwitches.quietDesktop;
   }
  private:
   IMPLEMENT_REFCOUNTING(SettingsClient);
@@ -540,7 +559,7 @@ class SettingsWindowDelegate final : public CefWindowDelegate {
     auto layout = window->SetToBoxLayout(layoutSettings);
     window->AddChildView(view_);
     layout->SetFlexForView(view_, 1);
-    if (!testMode) window->Show();
+    if (!testSwitches.quietDesktop) window->Show();
   }
   void OnWindowClosing(CefRefPtr<CefWindow>) override { settingsClosing = true; }
   void OnWindowDestroyed(CefRefPtr<CefWindow> window) override {
@@ -609,7 +628,7 @@ void openSettings(const std::string& requested) {
     if (!frame) throw std::runtime_error("The management window has no main frame");
     frame->LoadURL(url);
   }
-  if (!testMode) {
+  if (!testSwitches.quietDesktop) {
     settingsWindow->Restore();
     settingsWindow->Show();
     settingsWindow->Activate();
@@ -711,8 +730,14 @@ void initialize(const std::string& bundle, const std::string& profile) {
   checkThread();
   std::filesystem::create_directories(profile + "/Default");
   const auto canonicalProfile = std::filesystem::canonical(profile).string();
-  testMode = getenv("CHROMEL_CEF_TEST_MODE") && std::string(getenv("CHROMEL_CEF_TEST_MODE")) == "1";
-  if (testMode) {
+  testSwitches.enabled = envFlag("CHROMEL_CEF_TEST_MODE");
+  // Both promises default to whatever the mode says; the explicit variables let
+  // a run watch its windows (QUIET=0) or keep the real Keychain (HERMETIC=0).
+  testSwitches.quietDesktop = getenv("CHROMEL_CEF_TEST_QUIET") ? envFlag("CHROMEL_CEF_TEST_QUIET")
+                                                              : testSwitches.enabled;
+  testSwitches.hermetic = getenv("CHROMEL_CEF_TEST_HERMETIC") ? envFlag("CHROMEL_CEF_TEST_HERMETIC")
+                                                             : testSwitches.enabled;
+  if (testSwitches.hermetic) {
     auto temp = std::filesystem::canonical(utf8(NSTemporaryDirectory())).string() + "/";
     if (canonicalProfile.compare(0, temp.size(), temp) != 0)
       throw std::runtime_error("CEF test mode requires a temporary profile under NSTemporaryDirectory");
@@ -892,18 +917,21 @@ void command(int id, const std::string& action, const std::string& argument) {
   requireReady();
   if (id == 0 && action == "settings") { openSettings(argument); return; }
   if (id == 0 && action == "close-settings") { closeSettings(); return; }
-  if (id == 0 && action == "test-settings-close-window" && testMode) {
+  if (id == 0 && action == "test-settings-close-window") {
+    requireTestSwitches("test-settings-close-window");
     if (!settingsBrowser) throw std::runtime_error("No settings window");
     NSView* view = (__bridge NSView*)settingsBrowser->GetHost()->GetWindowHandle();
     [view.window performClose:nil];
     return;
   }
-  if (id == 0 && action == "test-settings-show" && testMode) {
+  if (id == 0 && action == "test-settings-show") {
+    requireTestSwitches("test-settings-show");
     if (!settingsWindow) throw std::runtime_error("No management window");
     settingsWindow->Show();
     return;
   }
-  if (id == 0 && action == "test-settings-script" && testMode) {
+  if (id == 0 && action == "test-settings-script") {
+    requireTestSwitches("test-settings-script");
     if (!settingsBrowser) throw std::runtime_error("No settings window");
     if (!settingsTestObserver) settingsTestObserver =
       settingsBrowser->GetHost()->AddDevToolsMessageObserver(new SettingsTestObserver);
@@ -1074,8 +1102,9 @@ void command(int id, const std::string& action, const std::string& argument) {
     auto frame = browser->GetFrameByIdentifier(utf8(request[@"frame"]));
     if (frame && frame->IsValid()) frame->ExecuteJavaScript(utf8(request[@"script"]), "", 1);
   }
-  else if ((action == "test-key-down" || action == "test-key-repeat" || action == "test-key-up" ||
-            action == "test-command-down" || action == "test-command-up") && testMode) {
+  else if (action == "test-key-down" || action == "test-key-repeat" || action == "test-key-up" ||
+           action == "test-command-down" || action == "test-command-up") {
+    requireTestSwitches("test key");
     if (argument != "j" && argument != "k") throw std::runtime_error("Unsupported held test key");
     const bool up = action == "test-key-up" || action == "test-command-up";
     NSEvent* event = [NSEvent keyEventWithType:up ? NSEventTypeKeyUp : NSEventTypeKeyDown
@@ -1085,7 +1114,8 @@ void command(int id, const std::string& action, const std::string& argument) {
     if (action == "test-command-down" || action == "test-command-up") routeKeyEvent(event);
     else [NSApp sendEvent:event];
   }
-  else if (action == "test-key" && testMode) {
+  else if (action == "test-key") {
+    requireTestSwitches("test-key");
     if (argument != "j" && argument != "k" && argument != "escape") throw std::runtime_error("Unsupported test key");
     // Exercise real Cocoa -> CEF keyboard dispatch, not the Lisp scroll command.
     NSString* characters = argument == "escape" ? @"\x1b" : ns(argument);
@@ -1141,7 +1171,10 @@ std::string info() {
     std::to_string(browsers.size()) + "\nSettings browsers: " +
     std::to_string(settingsBrowsers.size()) + "\nSettings windows: " +
     std::to_string(settingsWindow ? 1 : 0) + "\nKeychain: " +
-    (testMode ? "mock (disposable tests only)" : "system") + "\nProfile: " + profilePath;
+    (testSwitches.hermetic ? "mock (disposable tests only)" : "system") + "\nProfile: " + profilePath +
+    "\nTest switches: mode=" + (testSwitches.enabled ? "1" : "0") +
+    " quiet=" + (testSwitches.quietDesktop ? "1" : "0") +
+    " hermetic=" + (testSwitches.hermetic ? "1" : "0");
 }
 std::string inspect(int id) {
   requireReady();
@@ -1155,8 +1188,8 @@ std::string inspect(int id) {
       @"sharedContext": @(settingsBrowser && settingsBrowser->GetHost()->GetRequestContext()->IsSame(CefRequestContext::GetGlobalContext())),
       @"url": frame ? ns(frame->GetURL().ToString()) : @"",
       @"title": ns(settingsTitle), @"window": @(view.window.windowNumber),
-      @"testResult": testMode ? ns(settingsTestResult) : @"",
-      @"testSuccess": @(testMode && settingsTestSuccess)};
+      @"testResult": testSwitches.enabled ? ns(settingsTestResult) : @"",
+      @"testSuccess": @(testSwitches.enabled && settingsTestSuccess)};
     NSData* payload = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
     if (!payload) return "{}";
     return std::string(static_cast<const char*>(payload.bytes), payload.length);
