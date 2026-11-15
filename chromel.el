@@ -913,7 +913,7 @@ Returns non-nil when a list is live.  A missing or broken file only disables
 blocking: it must never stop the browser from starting."
   (let ((file (expand-file-name chromel-blocklist-file)))
     (cond
-     ((not (file-readable-p file))
+     ((not (and (file-regular-p file) (file-readable-p file)))
       (message "Chromel: no blocklist at %s" file)
       nil)
      ((not (fboundp 'chromel--native-blocklist-load))
