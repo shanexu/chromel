@@ -17,7 +17,7 @@
 
 ## 目标
 
-1. 加载标准列表编译出的规则，默认生效，无需逐条配置。
+1. 加载标准列表编译出的规则，默认生效（仓库自带编译好的快照），无需逐条配置。
 2. 拦截发生在请求离开浏览器进程之前（`OnBeforeResourceLoad`），页面不会看到被拦请求。
 3. `allow` 规则优先于拦截（uBOL 里 allow 的优先级更高）。
 4. 按站点关闭过滤：一条命令，作用于当前页面所属站点，记住并持久化。
@@ -69,8 +69,12 @@
 - **匹配**：对请求 host 从右往左逐级查后缀（`a.b.c` → `a.b.c`, `b.c`, `c`，最多 4 次），
   命中 allow 立即放行；否则命中 block 且资源类型匹配则 `RV_CANCEL`。
 - **资源类型**：`GetResourceType()` 转成位掩码，`mask == 0` 表示所有类型。
-- **按站点关闭**：例外列表以"顶层文档 host 后缀"匹配（取 `browser->GetMainFrame()->GetURL()`）。
-  命中例外则该页所有请求都不拦。Elisp 负责存储与命令，native 只负责查询。
+- **按站点关闭**：例外按 **host 后缀** 匹配（存 `example.com` 就覆盖它的子域），
+  比对对象是顶层文档的 host（取 `browser->GetMainFrame()->GetURL()`）。命中例外则该页所有
+  请求都不拦。Elisp 负责存储与命令，native 只负责查询。
+- **粒度**：`chromel-blocker-toggle-site` 默认只针对当前精确主机名；`C-u` 前缀升到父域
+  （取末两段）。若末两段命中内置的公共后缀小表（`co.uk`、`com.cn`、`github.io` 等，约几十条），
+  拒绝该操作并提示，避免一键关掉整个 `co.uk`。
 - **可观测**：`info()` 增加 `Blocklist: N rules, M blocked`；
   `M-x chromel-blocker-status` 回显规则数与拦截计数。
 
@@ -79,16 +83,25 @@
 路径前缀、子串 token 索引、正则兜底、`domainType` 的第三方判定（含近似 PSL）、
 元素隐藏的 CSS 注入。第一步的行格式与 API 预留这些字段，避免二次改格式。
 
+## 规则来源与更新（已定）
+
+- 快照与转换器一起进仓库：`data/blocklist.txt` 由固定版本的 uBOL 规则集编译而来，
+  文件头记录 uBOL 的 commit、生成时间与三套列表的名字。
+- 重新生成的步骤写进 `data/README.md`：下载 uBOL 三个 ruleset JSON →
+  `python3 scripts/ubol-to-blocklist.py … -o data/blocklist.txt`。
+- 许可证：uBOL 是 GPL-3.0；EasyList/EasyPrivacy 是 CC BY-SA。列表数据打包进本仓库时
+  在 `data/blocklist.LICENSE` 里写明来源与许可，README 指向它。
+
 ## 设计细节（我的判断，可推翻）
 
 - **文件格式**：沿用草稿的行格式，行首 `#` 为注释；每行
   `action \t types-hex \t flags \t spec`，`spec` 用 `;` 连接 `h=`/`i=`/`p=`/`u=`/`r=`。
   第一版只用 `h=`/`i=`，其余字段留给第二步。
-- **默认值**：`chromel-blocklist-file` 默认 `nil`（不拦）。用户把文件指过去才生效——
-  保持"没配置就什么都不做"，避免默认行为突变。
+- **默认值**：`chromel-blocklist-file` 默认为仓库内的 `data/blocklist.txt`（按
+  `chromel--directory` 解析）。文件不存在时禁用拦截并 `message` 说明，不报错。
 - **例外存储**：`chromel-blocker.json` 放在 `chromel-data-directory`，原子写（临时文件 + rename，
   模式 600），与 session 的写法一致；内存里用 hash 表做后缀查询。
-- **命令**：`M-x chromel-blocker-toggle-site` 对当前页面站点开关并回显结果；
+- **命令**：`M-x chromel-blocker-toggle-site` 对当前页面站点开关并回显结果（含它覆盖哪些主机）；
   `chromel-blocker-status` 显示规则数、命中数、当前站点是否被排除。
 - **资源类型掩码**：与 `RESOURCE_TYPES` 顺序一致（main_frame, sub_frame, stylesheet, script,
   image, font, object, xmlhttprequest, ping, media, websocket, other）。
@@ -115,16 +128,16 @@
 | 启动解析 3.7 MB 拖慢首次打开 | 只解析域名行，实测 < 100 ms；必要时改成二进制索引 |
 | 拦截太狠导致用户直接关掉功能 | 默认只上三套标准列表，不叠加 annoyances/urlhaus 等激进列表 |
 
-## 需要用户确认的点
+## 已确认的选择
 
-1. 默认名单就这三套（`ublock-filters` + `easylist` + `easyprivacy`），对吗？
-2. 规则文件放哪：`~/chromel/blocklist.txt`（与 `proxy.pac` 同目录），可以吗？
-3. "按站点"的粒度：`example.com` 连同子域一起关（我推荐），还是精确到
-   `www.example.com`？
+1. 默认名单：`ublock-filters` + `easylist` + `easyprivacy` 三套，编译成仓库内的快照，默认生效。
+2. 规则文件位置：`data/blocklist.txt`（随仓库），可用 `chromel-blocklist-file` 覆盖。
+3. 按站点粒度：默认精确主机，`C-u` 升父域；父域命中公共后缀小表时拒绝。
 
 ## 交付物
 
 - `scripts/ubol-to-blocklist.py`（草稿已存在，按本设计重写第一版范围）
+- `data/blocklist.txt`（固定版本快照）、`data/blocklist.LICENSE`、`data/README.md`（再生成步骤）
 - `native/blocklist.{h,mm}`、`native/chromel_core.mm` 的 `OnBeforeResourceLoad` 接入、
   `native/module.mm` 的加载/查询入口、`chromel.el` 的 defcustom/命令/事件
 - ERT：规则解析、后缀匹配、allow 优先、例外生效
