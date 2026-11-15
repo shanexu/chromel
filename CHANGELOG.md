@@ -29,6 +29,10 @@
 
 - DevTools 窗口改用专用 `DevToolsClient(owner)`：在 DevTools 里点开的链接会按所属页面打开新标签，不再是点了没反应；其余检查器事件仍不回传（没有对应 buffer）。
 
+### 内部结构
+
+- `command()` 不再是一条 205 行的 `if/else` 链：动作按名字放进 `browserActions()` / `settingsActions()` 两张表，派发只做一次查找。每个动作的代码与校验逻辑原样搬进自己的条目，行为未变（ERT 35/35、GUI 套件 20/20）。
+
 ### 测试与构建
 
 - 测试开关拆成三个明确的承诺：`CHROMEL_CEF_TEST_MODE`（存在 `test-*` 钩子）、`CHROMEL_CEF_TEST_QUIET`（不显示/不抢焦点）、`CHROMEL_CEF_TEST_HERMETIC`（mock keychain + 临时 profile），后两者默认跟随 MODE，因此现有测试无需改动；`info()` 会回报三个开关的取值。

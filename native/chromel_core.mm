@@ -19,6 +19,7 @@
 #include "include/cef_version.h"
 #include "include/wrapper/cef_helpers.h"
 #include "include/wrapper/cef_library_loader.h"
+#include <functional>
 #include <map>
 #include <vector>
 #include <algorithm>
@@ -913,240 +914,300 @@ void hide(int id) {
   page->selected = false;
 }
 
+namespace {
+
+// Every browser action lives in one table: the dispatcher stops being a chain
+// of string comparisons, and the name of an action is the name of the code that
+// implements it.  Bodies are the same code as before, moved not rewritten.
+using BrowserAction = std::function<void(const std::shared_ptr<Page>&, const std::string&)>;
+using SettingsAction = std::function<void(const std::string&)>;
+
+// Settings windows belong to no page; Lisp addresses them as browser 0.
+const std::map<std::string, SettingsAction>& settingsActions() {
+  static const std::map<std::string, SettingsAction> table = {
+    {"settings", [](const std::string& argument) { openSettings(argument); }},
+    {"close-settings", [](const std::string&) { closeSettings(); }},
+    {"test-settings-close-window", [](const std::string&) {
+      requireTestSwitches("test-settings-close-window");
+      if (!settingsBrowser) throw std::runtime_error("No settings window");
+      NSView* view = (__bridge NSView*)settingsBrowser->GetHost()->GetWindowHandle();
+      [view.window performClose:nil];
+    }},
+    {"test-settings-show", [](const std::string&) {
+      requireTestSwitches("test-settings-show");
+      if (!settingsWindow) throw std::runtime_error("No management window");
+      settingsWindow->Show();
+    }},
+    {"test-settings-script", [](const std::string& argument) {
+      requireTestSwitches("test-settings-script");
+      if (!settingsBrowser) throw std::runtime_error("No settings window");
+      if (!settingsTestObserver) settingsTestObserver =
+        settingsBrowser->GetHost()->AddDevToolsMessageObserver(new SettingsTestObserver);
+      settingsTestResult.clear();
+      settingsTestSuccess = false;
+      auto params = CefDictionaryValue::Create();
+      params->SetString("expression", argument);
+      params->SetBool("returnByValue", true);
+      params->SetBool("awaitPromise", true);
+      params->SetBool("userGesture", true);  // Simulate WebUI actions in disposable tests.
+      settingsBrowser->GetHost()->ExecuteDevToolsMethod(0, "Runtime.evaluate", params);
+    }},
+  };
+  return table;
+}
+
+// The held-key family shares one body; the action name selects which edge of
+// the key press is synthesized and whether Cocoa or Emacs sees it.
+void sendHeldTestKey(const std::shared_ptr<Page>& page, const std::string& action, const std::string& argument) {
+  requireTestSwitches("test key");
+  if (argument != "j" && argument != "k") throw std::runtime_error("Unsupported held test key");
+  const bool up = action == "test-key-up" || action == "test-command-up";
+  NSEvent* event = [NSEvent keyEventWithType:up ? NSEventTypeKeyUp : NSEventTypeKeyDown
+    location:NSZeroPoint modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
+    windowNumber:page->container.window.windowNumber context:nil characters:ns(argument)
+    charactersIgnoringModifiers:ns(argument) isARepeat:action == "test-key-repeat"
+    keyCode:argument == "j" ? 38 : 40];
+  if (action == "test-command-down" || action == "test-command-up") routeKeyEvent(event);
+  else [NSApp sendEvent:event];
+}
+
+const std::map<std::string, BrowserAction>& browserActions() {
+  static const std::map<std::string, BrowserAction> table = {
+    {"scroll-settings", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
+      NSArray* values = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+      if (![values isKindOfClass:NSArray.class] || values.count != 3)
+        throw std::runtime_error("Invalid scroll settings");
+      for (NSNumber* value in values)
+        if (![value isKindOfClass:NSNumber.class] || [value doubleValue] < 0 ||
+            [value doubleValue] > 10000000)
+          throw std::runtime_error("Invalid scroll settings");
+      page->scrollStep = [values[0] intValue];
+      page->scrollDuration = [values[1] intValue];
+      page->scrollSpeed = [values[2] intValue];
+    }},
+    {"scroll", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
+      NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+      if (![request isKindOfClass:NSDictionary.class] ||
+          ![request[@"amount"] isKindOfClass:NSNumber.class] ||
+          ![request[@"duration"] isKindOfClass:NSNumber.class] ||
+          ![request[@"speed"] isKindOfClass:NSNumber.class] ||
+          ![request[@"held"] isKindOfClass:NSNumber.class] ||
+          ![request[@"frame"] isKindOfClass:NSString.class] ||
+          ![@[@"pixels", @"half", @"top", @"bottom"] containsObject:request[@"mode"]])
+        throw std::runtime_error("Invalid scroll request");
+      const double amount = [request[@"amount"] doubleValue];
+      const double duration = [request[@"duration"] doubleValue];
+      const double speed = [request[@"speed"] doubleValue];
+      if (!std::isfinite(amount) || !std::isfinite(duration) || !std::isfinite(speed) ||
+          duration < 0 || duration > 10000000 || speed < 0 || speed > 10000000)
+        throw std::runtime_error("Invalid scroll values");
+      auto browser = page->browser;
+      auto frame = [request[@"frame"] length] ? browser->GetFrameByIdentifier(utf8(request[@"frame"]))
+                                             : browser->GetFocusedFrame();
+      if (!frame || !frame->IsValid()) frame = browser->GetMainFrame();
+      scrollPage(page, frame, amount, duration, speed, utf8(request[@"mode"]), [request[@"held"] boolValue]);
+    }},
+    {"navigate", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      auto frame = mainFrame(page->browser);
+      if (!frame) throw std::runtime_error("The browser has no main frame");
+      frame->LoadURL(argument);
+    }},
+    {"reload", [](const std::shared_ptr<Page>& page, const std::string&) { page->browser->Reload(); }},
+    {"back", [](const std::shared_ptr<Page>& page, const std::string&) { page->browser->GoBack(); }},
+    {"forward", [](const std::shared_ptr<Page>& page, const std::string&) { page->browser->GoForward(); }},
+    {"stop", [](const std::shared_ptr<Page>& page, const std::string&) { page->browser->StopLoad(); }},
+    {"find", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
+      NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+      if (![request isKindOfClass:NSDictionary.class] ||
+          ![request[@"text"] isKindOfClass:NSString.class] ||
+          ![request[@"token"] isKindOfClass:NSString.class] ||
+          ![request[@"forward"] isKindOfClass:NSNumber.class] ||
+          ![request[@"next"] isKindOfClass:NSNumber.class] ||
+          [request[@"text"] length] == 0 || [request[@"token"] length] == 0)
+        throw std::runtime_error("Invalid find request");
+      if (!page->pendingFind.empty()) throw std::runtime_error("A search is already pending");
+      auto browser = page->browser;
+      // In this Chromium version false only counts/highlights; true also
+      // selects a match.  Explicitly reset a new search, then select its match.
+      if (![request[@"next"] boolValue]) browser->GetHost()->StopFinding(true);
+      page->pendingFind = utf8(request[@"token"]);
+      browser->GetHost()->Find(utf8(request[@"text"]), [request[@"forward"] boolValue], false, true);
+    }},
+    {"find-stop", [](const std::shared_ptr<Page>& page, const std::string&) {
+      page->pendingFind.clear();
+      page->browser->GetHost()->StopFinding(true);
+    }},
+    {"selected", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      const bool selected = argument == "1";
+      if (page->selected && !selected) stopScroll(page);
+      page->selected = selected;
+    }},
+    {"focus", [](const std::shared_ptr<Page>& page, const std::string&) { page->browser->GetHost()->SetFocus(true); }},
+    {"unfocus", [](const std::shared_ptr<Page>& page, const std::string&) { unfocus(page); }},
+    {"focus-parent", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      auto browser = page->browser;
+      auto current = browser->GetFocusedFrame();
+      auto target = argument == "root" || !current ? browser->GetMainFrame() : current->GetParent();
+      if (!target || !target->IsValid()) target = browser->GetMainFrame();
+      if (current && current->IsValid())
+        current->ExecuteJavaScript("window.__emacsChromelScroller?.reset();", "", 1);
+      if (target && target->IsValid()) {
+        target->ExecuteJavaScript(
+          "(()=>{window.__emacsChromelScroller?.reset();"
+          "let e=document.activeElement;while(e?.shadowRoot?.activeElement)e=e.shadowRoot.activeElement;"
+          "window.focus();if(e?.matches('iframe,frame'))e.blur();})();", "", 1);
+      }
+      unfocus(page);
+    }},
+    {"click", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
+      NSDictionary* point = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+      if (![point isKindOfClass:NSDictionary.class] ||
+          ![point[@"x"] isKindOfClass:NSNumber.class] ||
+          ![point[@"y"] isKindOfClass:NSNumber.class] ||
+          ![point[@"newBuffer"] isKindOfClass:NSNumber.class])
+        throw std::runtime_error("Invalid click coordinates");
+      auto browser = page->browser;
+      // DOM rectangles are CSS pixels, CEF input coordinates are view DIPs.
+      const double zoom = std::pow(1.2, browser->GetHost()->GetZoomLevel());
+      const double x = [point[@"x"] doubleValue] * zoom;
+      const double y = [point[@"y"] doubleValue] * zoom;
+      if (page->container.hidden || !std::isfinite(x) || !std::isfinite(y) ||
+          x < 0 || y < 0 || x >= NSWidth(page->container.bounds) || y >= NSHeight(page->container.bounds))
+        throw std::runtime_error("Hint target is outside the visible browser view");
+      CefMouseEvent event;
+      event.x = static_cast<int>(x);
+      event.y = static_cast<int>(y);
+      event.modifiers = [point[@"newBuffer"] boolValue] ? EVENTFLAG_COMMAND_DOWN : 0;
+      if (event.modifiers && ![point[@"background"] boolValue]) event.modifiers |= EVENTFLAG_SHIFT_DOWN;
+      // Hint clicks start in Emacs command mode.  Dispatching a Chromium mouse
+      // event does not require giving the native view keyboard focus.  Editable
+      // hint targets use the separate "focus" command instead.
+      browser->GetHost()->SendMouseMoveEvent(event, false);
+      browser->GetHost()->SendMouseClickEvent(event, MBT_LEFT, false, 1);
+      browser->GetHost()->SendMouseClickEvent(event, MBT_LEFT, true, 1);
+    }},
+    {"eval", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
+      NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+      if (![request isKindOfClass:NSDictionary.class] ||
+          ![request[@"token"] isKindOfClass:NSString.class] ||
+          ![request[@"script"] isKindOfClass:NSString.class])
+        throw std::runtime_error("Invalid JavaScript request");
+      page->pendingEval = utf8(request[@"token"]);
+      auto frame = mainFrame(page->browser);
+      if (!frame) {
+        page->pendingEval.clear();
+        throw std::runtime_error("The browser has no main frame");
+      }
+      auto message = CefProcessMessage::Create("chromel.eval");
+      message->GetArgumentList()->SetString(0, page->pendingEval);
+      message->GetArgumentList()->SetString(1, utf8(request[@"script"]));
+      frame->SendProcessMessage(PID_RENDERER, message);
+    }},
+    {"javascript", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      // Fire-and-forget channel for Lisp callers that need no reply; the reply
+      // path above is the only one that can report success.  Elisp gates this
+      // action behind `chromel-allow-raw-javascript'.
+      auto frame = mainFrame(page->browser);
+      if (!frame) throw std::runtime_error("The browser has no main frame");
+      frame->ExecuteJavaScript(argument, "", 1);
+    }},
+    {"javascript-focused", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      // Route through CEF, not top.document: focused subframes may be
+      // cross-origin and hosted in a different renderer.  Releasing Cocoa
+      // keyboard focus does not change Chromium's focused frame.
+      auto browser = page->browser;
+      auto frame = browser->GetFocusedFrame();
+      if (!frame || !frame->IsValid()) frame = browser->GetMainFrame();
+      if (frame && frame->IsValid()) frame->ExecuteJavaScript(argument, "", 1);
+    }},
+    {"javascript-frame", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
+      NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+      if (![request isKindOfClass:NSDictionary.class] ||
+          ![request[@"frame"] isKindOfClass:NSString.class] ||
+          ![request[@"script"] isKindOfClass:NSString.class])
+        throw std::runtime_error("Invalid frame script request");
+      auto frame = page->browser->GetFrameByIdentifier(utf8(request[@"frame"]));
+      if (frame && frame->IsValid()) frame->ExecuteJavaScript(utf8(request[@"script"]), "", 1);
+    }},
+    {"test-key-down", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      sendHeldTestKey(page, "test-key-down", argument);
+    }},
+    {"test-key-repeat", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      sendHeldTestKey(page, "test-key-repeat", argument);
+    }},
+    {"test-key-up", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      sendHeldTestKey(page, "test-key-up", argument);
+    }},
+    {"test-command-down", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      sendHeldTestKey(page, "test-command-down", argument);
+    }},
+    {"test-command-up", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      sendHeldTestKey(page, "test-command-up", argument);
+    }},
+    {"test-key", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      requireTestSwitches("test-key");
+      if (argument != "j" && argument != "k" && argument != "escape")
+        throw std::runtime_error("Unsupported test key");
+      // Exercise real Cocoa -> CEF keyboard dispatch, not the Lisp scroll command.
+      NSString* characters = argument == "escape" ? @"\x1b" : ns(argument);
+      for (auto type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
+        NSEvent* event = [NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:0
+          timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:page->container.window.windowNumber
+          context:nil characters:characters charactersIgnoringModifiers:characters
+          isARepeat:NO keyCode:argument == "escape" ? 53 : (argument == "j" ? 38 : 40)];
+        if (argument == "escape") {
+          // A real Escape arrives in an active app whose window is key.  Posted
+          // events to a background app are dropped at random, so make the test
+          // window key first instead of depending on the user's click order.
+          NSWindow* target = page->container.window;
+          if (!target) throw std::runtime_error("Test key needs a window");
+          [NSApp activateIgnoringOtherApps:YES];
+          [target makeKeyAndOrderFront:nil];
+          [NSApp postEvent:event atStart:NO];
+        }
+        else [NSApp sendEvent:event];
+      }
+    }},
+    {"devtools", [](const std::shared_ptr<Page>& page, const std::string&) {
+      CefWindowInfo wi;
+      CefBrowserSettings settings;
+      page->browser->GetHost()->ShowDevTools(wi, new DevToolsClient((int)page->id), settings, CefPoint());
+    }},
+    {"close", [](const std::shared_ptr<Page>& page, const std::string&) {
+      unfocus(page);
+      page->closing = true;
+      page->container.hidden = YES;
+      page->browser->GetHost()->CloseBrowser(true);
+    }},
+  };
+  return table;
+}
+
+}  // namespace
+
 void command(int id, const std::string& action, const std::string& argument) {
   requireReady();
-  if (id == 0 && action == "settings") { openSettings(argument); return; }
-  if (id == 0 && action == "close-settings") { closeSettings(); return; }
-  if (id == 0 && action == "test-settings-close-window") {
-    requireTestSwitches("test-settings-close-window");
-    if (!settingsBrowser) throw std::runtime_error("No settings window");
-    NSView* view = (__bridge NSView*)settingsBrowser->GetHost()->GetWindowHandle();
-    [view.window performClose:nil];
-    return;
-  }
-  if (id == 0 && action == "test-settings-show") {
-    requireTestSwitches("test-settings-show");
-    if (!settingsWindow) throw std::runtime_error("No management window");
-    settingsWindow->Show();
-    return;
-  }
-  if (id == 0 && action == "test-settings-script") {
-    requireTestSwitches("test-settings-script");
-    if (!settingsBrowser) throw std::runtime_error("No settings window");
-    if (!settingsTestObserver) settingsTestObserver =
-      settingsBrowser->GetHost()->AddDevToolsMessageObserver(new SettingsTestObserver);
-    settingsTestResult.clear();
-    settingsTestSuccess = false;
-    auto params = CefDictionaryValue::Create();
-    params->SetString("expression", argument);
-    params->SetBool("returnByValue", true);
-    params->SetBool("awaitPromise", true);
-    params->SetBool("userGesture", true);  // Simulate WebUI actions in disposable tests.
-    settingsBrowser->GetHost()->ExecuteDevToolsMethod(0, "Runtime.evaluate", params);
+  if (id == 0) {
+    const auto& settings = settingsActions();
+    const auto entry = settings.find(action);
+    if (entry == settings.end()) throw std::runtime_error("Unknown browser action: " + action);
+    entry->second(argument);
     return;
   }
   auto page = pageFor(id);
-  auto browser = page->browser;
-  if (action == "navigate" || action == "reload" || action == "back" || action == "forward") stopScroll(page);
-  if (action == "scroll-settings") {
-    NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
-    NSArray* values = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![values isKindOfClass:NSArray.class] || values.count != 3)
-      throw std::runtime_error("Invalid scroll settings");
-    for (NSNumber* value in values) if (![value isKindOfClass:NSNumber.class] || [value doubleValue] < 0 ||
-                                  [value doubleValue] > 10000000)
-      throw std::runtime_error("Invalid scroll settings");
-    page->scrollStep = [values[0] intValue];
-    page->scrollDuration = [values[1] intValue];
-    page->scrollSpeed = [values[2] intValue];
-  }
-  else if (action == "scroll") {
-    NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![request isKindOfClass:NSDictionary.class] ||
-        ![request[@"amount"] isKindOfClass:NSNumber.class] ||
-        ![request[@"duration"] isKindOfClass:NSNumber.class] ||
-        ![request[@"speed"] isKindOfClass:NSNumber.class] ||
-        ![request[@"held"] isKindOfClass:NSNumber.class] ||
-        ![request[@"frame"] isKindOfClass:NSString.class] ||
-        ![@[@"pixels", @"half", @"top", @"bottom"] containsObject:request[@"mode"]])
-      throw std::runtime_error("Invalid scroll request");
-    const double amount = [request[@"amount"] doubleValue];
-    const double duration = [request[@"duration"] doubleValue], speed = [request[@"speed"] doubleValue];
-    if (!std::isfinite(amount) || !std::isfinite(duration) || !std::isfinite(speed) ||
-        duration < 0 || duration > 10000000 || speed < 0 || speed > 10000000)
-      throw std::runtime_error("Invalid scroll values");
-    auto frame = [request[@"frame"] length] ? browser->GetFrameByIdentifier(utf8(request[@"frame"])) : browser->GetFocusedFrame();
-    if (!frame || !frame->IsValid()) frame = browser->GetMainFrame();
-    scrollPage(page, frame, amount, duration, speed, utf8(request[@"mode"]), [request[@"held"] boolValue]);
-  }
-  else if (action == "navigate") {
-    auto frame = mainFrame(browser);
-    if (!frame) throw std::runtime_error("The browser has no main frame");
-    frame->LoadURL(argument);
-  }
-  else if (action == "reload") browser->Reload();
-  else if (action == "back") browser->GoBack();
-  else if (action == "forward") browser->GoForward();
-  else if (action == "stop") browser->StopLoad();
-  else if (action == "find") {
-    NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![request isKindOfClass:NSDictionary.class] ||
-        ![request[@"text"] isKindOfClass:NSString.class] ||
-        ![request[@"token"] isKindOfClass:NSString.class] ||
-        ![request[@"forward"] isKindOfClass:NSNumber.class] ||
-        ![request[@"next"] isKindOfClass:NSNumber.class] ||
-        [request[@"text"] length] == 0 || [request[@"token"] length] == 0)
-      throw std::runtime_error("Invalid find request");
-    if (!page->pendingFind.empty()) throw std::runtime_error("A search is already pending");
-    // In this Chromium version false only counts/highlights; true also
-    // selects a match.  Explicitly reset a new search, then select its match.
-    if (![request[@"next"] boolValue]) browser->GetHost()->StopFinding(true);
-    page->pendingFind = utf8(request[@"token"]);
-    browser->GetHost()->Find(utf8(request[@"text"]), [request[@"forward"] boolValue], false, true);
-  }
-  else if (action == "find-stop") {
-    page->pendingFind.clear();
-    browser->GetHost()->StopFinding(true);
-  }
-  else if (action == "selected") {
-    const bool selected = argument == "1";
-    if (page->selected && !selected) stopScroll(page);
-    page->selected = selected;
-  }
-  else if (action == "focus") browser->GetHost()->SetFocus(true);
-  else if (action == "unfocus") unfocus(page);
-  else if (action == "focus-parent") {
-    auto current = browser->GetFocusedFrame();
-    auto target = argument == "root" || !current ? browser->GetMainFrame() : current->GetParent();
-    if (!target || !target->IsValid()) target = browser->GetMainFrame();
-    if (current && current->IsValid())
-      current->ExecuteJavaScript("window.__emacsChromelScroller?.reset();", "", 1);
-    if (target && target->IsValid()) {
-      target->ExecuteJavaScript(
-        "(()=>{window.__emacsChromelScroller?.reset();"
-        "let e=document.activeElement;while(e?.shadowRoot?.activeElement)e=e.shadowRoot.activeElement;"
-        "window.focus();if(e?.matches('iframe,frame'))e.blur();})();", "", 1);
-    }
-    unfocus(page);
-  }
-  else if (action == "click") {
-    NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary* point = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![point isKindOfClass:NSDictionary.class] ||
-        ![point[@"x"] isKindOfClass:NSNumber.class] ||
-        ![point[@"y"] isKindOfClass:NSNumber.class] ||
-        ![point[@"newBuffer"] isKindOfClass:NSNumber.class])
-      throw std::runtime_error("Invalid click coordinates");
-    // DOM rectangles are CSS pixels, CEF input coordinates are view DIPs.
-    const double zoom = std::pow(1.2, browser->GetHost()->GetZoomLevel());
-    const double x = [point[@"x"] doubleValue] * zoom;
-    const double y = [point[@"y"] doubleValue] * zoom;
-    if (page->container.hidden || !std::isfinite(x) || !std::isfinite(y) ||
-        x < 0 || y < 0 || x >= NSWidth(page->container.bounds) || y >= NSHeight(page->container.bounds))
-      throw std::runtime_error("Hint target is outside the visible browser view");
-    CefMouseEvent event;
-    event.x = static_cast<int>(x);
-    event.y = static_cast<int>(y);
-    event.modifiers = [point[@"newBuffer"] boolValue] ? EVENTFLAG_COMMAND_DOWN : 0;
-    if (event.modifiers && ![point[@"background"] boolValue]) event.modifiers |= EVENTFLAG_SHIFT_DOWN;
-    // Hint clicks start in Emacs command mode.  Dispatching a Chromium mouse
-    // event does not require giving the native view keyboard focus.  Editable
-    // hint targets use the separate "focus" command instead.
-    browser->GetHost()->SendMouseMoveEvent(event, false);
-    browser->GetHost()->SendMouseClickEvent(event, MBT_LEFT, false, 1);
-    browser->GetHost()->SendMouseClickEvent(event, MBT_LEFT, true, 1);
-  }
-  else if (action == "eval") {
-    NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![request isKindOfClass:NSDictionary.class] ||
-        ![request[@"token"] isKindOfClass:NSString.class] ||
-        ![request[@"script"] isKindOfClass:NSString.class])
-      throw std::runtime_error("Invalid JavaScript request");
-    page->pendingEval = utf8(request[@"token"]);
-    auto frame = mainFrame(browser);
-    if (!frame) {
-      page->pendingEval.clear();
-      throw std::runtime_error("The browser has no main frame");
-    }
-    auto message = CefProcessMessage::Create("chromel.eval");
-    message->GetArgumentList()->SetString(0, page->pendingEval);
-    message->GetArgumentList()->SetString(1, utf8(request[@"script"]));
-    frame->SendProcessMessage(PID_RENDERER, message);
-  }
-  else if (action == "javascript") {
-    // Fire-and-forget channel for Lisp callers that need no reply; the reply
-    // path above is the only one that can report success.  Elisp gates this
-    // action behind `chromel-allow-raw-javascript'.
-    auto frame = mainFrame(browser);
-    if (!frame) throw std::runtime_error("The browser has no main frame");
-    frame->ExecuteJavaScript(argument, "", 1);
-  }
-  else if (action == "javascript-focused") {
-    // Route through CEF, not top.document: focused subframes may be cross-origin
-    // and hosted in a different renderer.  Releasing Cocoa keyboard focus does
-    // not change Chromium's focused frame.
-    auto frame = browser->GetFocusedFrame();
-    if (!frame || !frame->IsValid()) frame = browser->GetMainFrame();
-    if (frame && frame->IsValid()) frame->ExecuteJavaScript(argument, "", 1);
-  }
-  else if (action == "javascript-frame") {
-    NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
-    NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-    if (![request isKindOfClass:NSDictionary.class] ||
-        ![request[@"frame"] isKindOfClass:NSString.class] ||
-        ![request[@"script"] isKindOfClass:NSString.class])
-      throw std::runtime_error("Invalid frame script request");
-    auto frame = browser->GetFrameByIdentifier(utf8(request[@"frame"]));
-    if (frame && frame->IsValid()) frame->ExecuteJavaScript(utf8(request[@"script"]), "", 1);
-  }
-  else if (action == "test-key-down" || action == "test-key-repeat" || action == "test-key-up" ||
-           action == "test-command-down" || action == "test-command-up") {
-    requireTestSwitches("test key");
-    if (argument != "j" && argument != "k") throw std::runtime_error("Unsupported held test key");
-    const bool up = action == "test-key-up" || action == "test-command-up";
-    NSEvent* event = [NSEvent keyEventWithType:up ? NSEventTypeKeyUp : NSEventTypeKeyDown
-      location:NSZeroPoint modifierFlags:0 timestamp:NSProcessInfo.processInfo.systemUptime
-      windowNumber:page->container.window.windowNumber context:nil characters:ns(argument)
-      charactersIgnoringModifiers:ns(argument) isARepeat:action == "test-key-repeat" keyCode:argument == "j" ? 38 : 40];
-    if (action == "test-command-down" || action == "test-command-up") routeKeyEvent(event);
-    else [NSApp sendEvent:event];
-  }
-  else if (action == "test-key") {
-    requireTestSwitches("test-key");
-    if (argument != "j" && argument != "k" && argument != "escape") throw std::runtime_error("Unsupported test key");
-    // Exercise real Cocoa -> CEF keyboard dispatch, not the Lisp scroll command.
-    NSString* characters = argument == "escape" ? @"\x1b" : ns(argument);
-    for (auto type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
-      NSEvent* event = [NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:0
-        timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:page->container.window.windowNumber
-        context:nil characters:characters charactersIgnoringModifiers:characters
-        isARepeat:NO keyCode:argument == "escape" ? 53 : (argument == "j" ? 38 : 40)];
-      if (argument == "escape") {
-        // A real Escape arrives in an active app whose window is key.  Posted
-        // events to a background app are dropped at random, so make the test
-        // window key first instead of depending on the user's click order.
-        NSWindow* target = page->container.window;
-        if (!target) throw std::runtime_error("Test key needs a window");
-        [NSApp activateIgnoringOtherApps:YES];
-        [target makeKeyAndOrderFront:nil];
-        [NSApp postEvent:event atStart:NO];
-      }
-      else [NSApp sendEvent:event];
-    }
-  }
-  else if (action == "devtools") {
-    CefWindowInfo wi;
-    CefBrowserSettings settings;
-    browser->GetHost()->ShowDevTools(wi, new DevToolsClient(page->id), settings, CefPoint());
-  } else if (action == "close") {
-    unfocus(page);
-    page->closing = true;
-    page->container.hidden = YES;
-    browser->GetHost()->CloseBrowser(true);
-  } else throw std::runtime_error("Unknown browser action");
+  // Navigation drops any in-flight scroll before the document changes.
+  if (action == "navigate" || action == "reload" || action == "back" || action == "forward")
+    stopScroll(page);
+  const auto& table = browserActions();
+  const auto entry = table.find(action);
+  if (entry == table.end()) throw std::runtime_error("Unknown browser action: " + action);
+  entry->second(page, argument);
 }
 
 void pump() {
