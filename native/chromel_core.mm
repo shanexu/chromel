@@ -619,6 +619,32 @@ NSEvent* routeKeyEvent(NSEvent* event) {
       break;
     }
   }
+  // Edit commands for the page that owns the keyboard.  Chromium's own
+  // accelerator handling does not fire for keys forwarded while Emacs is the
+  // active app, so Cmd+V/C/X/A/Z would otherwise do nothing in a focused page.
+  if (flags & NSEventModifierFlagCommand) {
+    const bool shift = (flags & NSEventModifierFlagShift) != 0;
+    for (const auto& item : pages) {
+      const auto& page = item.second;
+      if (page->closing || event.window != page->container.window || page->container.hidden ||
+          !ownsFocus(page))
+        continue;
+      CefRefPtr<CefFrame> frame = mainFrame(page->browser);
+      if (!frame) break;
+      switch (key.length == 1 ? [key characterAtIndex:0] : 0) {
+        case 'v': frame->Paste(); return nil;
+        case 'c': frame->Copy(); return nil;
+        case 'x': frame->Cut(); return nil;
+        case 'a': frame->SelectAll(); return nil;
+        case 'z':
+          if (shift) frame->Redo();
+          else frame->Undo();
+          return nil;
+        default: break;
+      }
+      break;
+    }
+  }
   return event;
 }
 }  // namespace
@@ -976,25 +1002,54 @@ const std::map<std::string, BrowserAction>& browserActions() {
     }},
     {"test-key", [](const std::shared_ptr<Page>& page, const std::string& argument) {
       requireTestSwitches("test-key");
-      if (argument != "j" && argument != "k" && argument != "escape")
-        throw std::runtime_error("Unsupported test key");
-      // Exercise real Cocoa -> CEF keyboard dispatch, not the Lisp scroll command.
-      NSString* characters = argument == "escape" ? @"\x1b" : ns(argument);
-      for (auto type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
-        NSEvent* event = [NSEvent keyEventWithType:type location:NSZeroPoint modifierFlags:0
-          timestamp:NSProcessInfo.processInfo.systemUptime windowNumber:page->container.window.windowNumber
-          context:nil characters:characters charactersIgnoringModifiers:characters
-          isARepeat:NO keyCode:argument == "escape" ? 53 : (argument == "j" ? 38 : 40)];
-        if (argument == "escape") {
-          // A real Escape arrives in an active app whose window is key.  Posted
-          // events to a background app are dropped at random, so make the test
-          // window key first instead of depending on the user's click order.
-          NSWindow* target = page->container.window;
-          if (!target) throw std::runtime_error("Test key needs a window");
-          [NSApp activateIgnoringOtherApps:YES];
-          [target makeKeyAndOrderFront:nil];
-          [NSApp postEvent:event atStart:NO];
+      // ANSI virtual key codes: Chromium reads both `characters` and `keyCode`,
+      // and a wrong code makes text input silently do nothing.
+      const auto virtualCode = [](char c) -> unsigned short {
+        switch (c) {
+          case 'a': return 0;  case 's': return 1;  case 'd': return 2;  case 'f': return 3;
+          case 'h': return 4;  case 'g': return 5;  case 'z': return 6;  case 'x': return 7;
+          case 'c': return 8;  case 'v': return 9;  case 'b': return 11; case 'q': return 12;
+          case 'w': return 13; case 'e': return 14; case 'r': return 15; case 'y': return 16;
+          case 't': return 17; case 'o': return 31; case 'u': return 32; case 'i': return 34;
+          case 'p': return 35; case 'l': return 37; case 'j': return 38; case 'k': return 40;
+          case 'n': return 45; case 'm': return 46;
+          default: return 0;
         }
+      };
+      const bool command = argument.rfind("cmd-", 0) == 0;
+      const std::string name = command ? argument.substr(4) : argument;
+      if (name != "escape" && name.size() != 1)
+        throw std::runtime_error("Unsupported test key");
+      // A forwarded Command key must land on a page that owns the keyboard,
+      // otherwise it re-enters Emacs' own command loop.  Plain keys must not
+      // touch focus: the scroll tests rely on an iframe keeping it.
+      if (command) {
+        if (NSView* view = (__bridge NSView*)page->browser->GetHost()->GetWindowHandle()) {
+          [page->container.window makeFirstResponder:view];
+          page->browser->GetHost()->SetFocus(true);
+        }
+      }
+      if (name == "escape") {
+        // A real Escape arrives in an active app whose window is key.  Posted
+        // events to a background app are dropped at random, so make the test
+        // window key first instead of depending on the user's click order.
+        [NSApp activateIgnoringOtherApps:YES];
+        [page->container.window makeKeyAndOrderFront:nil];
+      }
+      NSString* characters = name == "escape" ? @"\x1b" : ns(name);
+      const unsigned short keyCode = name == "escape" ? 53 : virtualCode(name[0]);
+      for (auto type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
+        // Only the key-down types text: a key-up carrying the same characters
+        // makes the renderer insert it twice.
+        NSString* text = type == NSEventTypeKeyUp ? @"" : characters;
+        NSEvent* event = [NSEvent keyEventWithType:type location:NSZeroPoint
+          modifierFlags:command ? NSEventModifierFlagCommand : 0
+          timestamp:NSProcessInfo.processInfo.systemUptime
+          windowNumber:page->container.window.windowNumber context:nil characters:text
+          charactersIgnoringModifiers:text isARepeat:NO keyCode:keyCode];
+        // Escape has to be posted, not dispatched: it is only honoured once the
+        // app is active and the run loop reaches it.
+        if (name == "escape") [NSApp postEvent:event atStart:NO];
         else [NSApp sendEvent:event];
       }
     }},

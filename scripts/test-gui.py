@@ -99,6 +99,16 @@ Notification.requestPermission().then(function (result) {
 });
 </script><h1>Permission</h1>"""
             content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/paste'):
+            # A focused text field the size of the viewport, so a synthetic
+            # click always lands inside it.
+            # The title mirrors the field, so a test can read the value through
+            # the browser's title changes instead of evaluating scripts.
+            body = (b"<!doctype html><title>value:</title>"
+                    b"<input id=i oninput=\"document.title='value:'+this.value\" "
+                    b"style=\"position:fixed;left:0;top:0;width:400px;height:200px;"
+                    b"font-size:20px\">")
+            content_type = "text/html; charset=utf-8"
         elif self.path == '/hint-target':
             body = b"<!doctype html><meta charset=utf-8><title>hint-target</title><h1>Link followed</h1>"
         elif self.path == '/features':
@@ -162,8 +172,9 @@ try:
             ("management", "gui-management.el"),
             ("crash-fixture", "gui-crash.el"),
             ("chromel-emacs-restored", "gui-download.el"),
-        ("chromel-emacs-restored", "gui-permission.el"),
+            ("chromel-emacs-restored", "gui-permission.el"),
             ("chromel-emacs-restored", "gui-proxy.el"),
+            ("paste-fixture", "gui-paste.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:
@@ -177,7 +188,8 @@ try:
                 tests.insert(0, ("chromel-emacs-ready", "gui-smoke.el"))
         for expected, script in tests:
             route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
-                     'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html'}.get(script, '/fixture')
+                     'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html',
+                     'gui-paste.el': '/paste'}.get(script, '/fixture')
             test_url = url.replace('/fixture', route)
             result = pathlib.Path(temp) / "result"
             result.unlink(missing_ok=True)
