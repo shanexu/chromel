@@ -74,8 +74,12 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 ### B5 ✅ 没有 Elisp↔模块 ABI 握手
 `chromel_core.h` 新增 `kChromelApiVersion`（A7 之后为 3）与 `api_version()`，模块导出 `chromel--native-api-version`；`chromel-module-api-version` 与 `chromel--check-module-api` 在 `chromel--ensure-module` 末尾断言，缺函数或数字不符都直接 `user-error` 并提示 `./scripts/build.sh`。ERT 增 2 条（一致、`nil` 与 `99` 两种不符），31/31 通过（C5 升到 2 后为 35/35）。
 
-### B6 testMode 渗进生产路径
-`command()`/`click`/`initialize()` 里散落 `testMode` 分支。**做法**：收敛到单一 `isTestMode()` + 一处文档说明，避免将来在正式路径误开。
+### B6 ✅ 把 testMode 拆成三个有名字的开关
+原先一个 `testMode` 同时表达三件事：我是测试进程 / 别打扰用户桌面 / 别碰真 Keychain。读代码的人无法判断某处 `if (!testMode)` 到底是哪个意思，生产里误设环境变量就会得到"设置窗口永不显示"这种真 bug。
+现在是 `struct TestSwitches { enabled, quietDesktop, hermetic }`：`CHROMEL_CEF_TEST_MODE=1` 决定 `enabled`，`CHROMEL_CEF_TEST_QUIET` / `CHROMEL_CEF_TEST_HERMETIC` 各自覆盖，默认都跟随 MODE（19 个 GUI 脚本零改动）。`test-*` 动作统一走 `requireTestSwitches()`，生产进程报 `Unknown browser action: <name>` 而不是静默跳过；`info()` 打印三个开关。
+验证：完整套件 20/20 PASS（`gui-escape` 走 `test-key`、`gui-settings/passwords/management` 走 `quietDesktop`、`gui-pump` 走计数）。
+
+### B6-old 旧描述（已完成，留档）
 
 ### B7 全局状态
 21 个全局 defvar、单个 1039 行 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。**做法**：先把 settings 相关 6 个全局收进一个 `SettingsState`，作为中间步。
