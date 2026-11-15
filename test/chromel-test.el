@@ -726,6 +726,17 @@
   (chromel--ensure-module)
   (should-error (chromel--native-blocklist-load "/nonexistent/blocklist.txt")))
 
+(ert-deftest chromel-blocker-apply-rejects-a-directory ()
+  "A path that is not a regular file must not load zero rules by accident."
+  (let ((chromel-blocklist-file temporary-file-directory)
+        (chromel--blocker-exceptions nil)
+        (messages nil))
+    (cl-letf (((symbol-function 'message)
+               (lambda (format-string &rest arguments)
+                 (push (apply #'format format-string arguments) messages))))
+      (should-not (chromel--blocker-apply)))
+    (should (string-match-p "no blocklist" (car messages)))))
+
 (ert-deftest chromel-blocker-toggle-site-adds-and-removes-exact-host ()
   (let ((chromel--blocker-exceptions nil))
     (cl-letf (((symbol-function 'chromel--blocker-page-host) (lambda () "www.example.com"))
