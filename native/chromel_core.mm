@@ -5,6 +5,7 @@
 #include "page.h"
 #include "settings.h"
 #include "downloads.h"
+#include "permissions.h"
 #include "events.h"
 #include "chromel_scripts.h"
 #include "host_wakeup.h"
@@ -255,6 +256,55 @@ class DownloadHandler final : public CefDownloadHandler {
   IMPLEMENT_REFCOUNTING(DownloadHandler);
 };
 
+// Permission requests arrive on the UI thread with a callback that must run
+// exactly once. We park it in permissions.mm and let Emacs answer later, since
+// a y-or-n-p would block the very thread that has to pump CEF.
+class PermissionHandler final : public CefPermissionHandler {
+ public:
+  explicit PermissionHandler(int id) : id_(id) {}
+
+  bool OnRequestMediaAccessPermission(
+      CefRefPtr<CefBrowser> browser, CefRefPtr<CefFrame> frame,
+      const CefString& requesting_origin, uint32_t requested_permissions,
+      CefRefPtr<CefMediaAccessCallback> callback) override {
+    (void)browser;
+    (void)frame;
+    if (!callback) return false;
+    chromel::begin_prompt(id_, requesting_origin.ToString(),
+                          chromel::permission_names(requested_permissions, 0), nullptr,
+                          callback, requested_permissions);
+    return true;
+  }
+
+  bool OnShowPermissionPrompt(CefRefPtr<CefBrowser> browser,
+                              uint64_t prompt_id,
+                              const CefString& requesting_origin,
+                              uint32_t requested_permissions,
+                              CefRefPtr<CefPermissionPromptCallback> callback) override {
+    (void)browser;
+    (void)prompt_id;
+    if (!callback) return false;
+    chromel::begin_prompt(id_, requesting_origin.ToString(),
+                          chromel::permission_names(0, requested_permissions), callback,
+                          nullptr, 0);
+    return true;
+  }
+
+  void OnDismissPermissionPrompt(CefRefPtr<CefBrowser> browser,
+                                 uint64_t prompt_id,
+                                 cef_permission_request_result_t result) override {
+    (void)browser;
+    (void)result;
+    // Chromium withdrew or already answered it; the callback is no longer ours.
+    chromel::dismiss_prompt(prompt_id);
+  }
+
+ private:
+  int id_;
+
+  IMPLEMENT_REFCOUNTING(PermissionHandler);
+};
+
 class Client final : public CefClient,
                      public CefLifeSpanHandler,
                      public CefDisplayHandler,
@@ -263,7 +313,8 @@ class Client final : public CefClient,
                      public CefRequestHandler,
                      public CefKeyboardHandler,
                      public CefFindHandler,
-                     public CefDownloadHandler {
+                     public CefDownloadHandler,
+                     public CefPermissionHandler {
  public:
   explicit Client(int id) : id_(id) {}
   CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
@@ -275,6 +326,9 @@ class Client final : public CefClient,
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
     return new DownloadHandler(id_);
+  }
+  CefRefPtr<CefPermissionHandler> GetPermissionHandler() override {
+    return new PermissionHandler(id_);
   }
   void OnFindResult(CefRefPtr<CefBrowser>, int identifier, int count, const CefRect&,
                     int ordinal, bool finalUpdate) override {
@@ -1027,6 +1081,8 @@ std::string inspect(int id) {
 void shutdown() {
   checkThread();
   if (!initialized || stopped) return;
+  // Answer parked permission prompts before the callbacks lose their browser.
+  cancel_prompts();
   hostWakeup.reset();
   for (id token : observers) [NSNotificationCenter.defaultCenter removeObserver:token];
   observers.clear();

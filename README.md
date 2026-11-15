@@ -4,7 +4,7 @@ Chromel 是 macOS 上的 Emacs 原生浏览器插件：一个网页对应一个 
 
 内部原理（三层结构、事件泵、焦点与键盘模型）见 [`docs/architecture.md`](docs/architecture.md)。
 
-首个版本提供网页浏览、导航、独立 profile、Chromium 设置页、浏览历史和 DevTools，支持手动添加密码后的自动填充，以及 Chrome Web Store 安装和扩展管理。普通网页嵌入 Emacs，设置和管理页面在独立窗口中打开。下载直接落到 `chromel-download-directory`（没有下载搁架和下载管理界面），暂不支持 Chrome 同步或书签管理。
+首个版本提供网页浏览、导航、独立 profile、Chromium 设置页、浏览历史和 DevTools，支持手动添加密码后的自动填充，以及 Chrome Web Store 安装和扩展管理。普通网页嵌入 Emacs，设置和管理页面在独立窗口中打开。下载直接落到 `chromel-download-directory`（没有下载搁架和下载管理界面），网页的权限请求会在回显区问一次并记住答案，暂不支持 Chrome 同步或书签管理。
 
 提供 Vimium 风格的键位、关闭页面恢复、会话自动保存和延迟恢复。Meow 是可选适配，不需要安装即可使用全部浏览器键位。
 
@@ -258,6 +258,28 @@ Chromium 的启动页、搜索引擎等选项不会替代 `chromel-home-url`、E
 ```
 
 改动只影响之后开始的下载，不需要重启，也不需要重新加载模块。没有下载搁架、下载列表或"另存为"对话框：想换目录就改这个变量，再点一次链接。页面里的 `target=_blank` 下载链接同样走这条路。
+
+## 权限请求
+
+网页要求通知、地理位置、摄像头/麦克风、剪贴板读取这类权限时，Chromel 在回显区问一句：
+
+```text
+Allow https://example.org/ to use location? (y or n)
+```
+
+答案在本次会话内按「来源 + 权限名」记住：同一个站点再要同一项权限，就直接沿用上次的答案。回答 `n` 或按 `C-g` 都是拒绝，页面只会拿不到该权限，不会崩。
+
+不想被打断就预置策略，没列出的仍然会问：
+
+```elisp
+(setq chromel-permission-policy
+      '(("location" . deny)          ; 从不授权定位
+        ("notifications" . allow)))  ; 通知直接放行
+```
+
+键是提示里显示的名字：`location`、`notifications`、`camera`、`microphone`、`clipboard`、`pointer lock`、`multiple downloads`、`local fonts`……优先级是「本次会话已答过的 > 策略 > 询问」；一个请求里只要有一项被策略拒绝，整条请求都会被拒（底层只有一个回调，没法只批一半）。
+
+答案只活在这次 Emacs 会话里：Chromel 不写自己的权限数据库，重启后同一来源会重新询问（除非 Chromium 自己缓存了该决定）。摄像头/麦克风真正要拿到设备流还需要 `--enable-media-stream` 之类的开关，权限放行只是不再被静默拒绝。
 
 ## 数据和能力边界
 

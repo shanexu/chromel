@@ -89,6 +89,16 @@ class Fixture(http.server.BaseHTTPRequestHandler):
 <style>html,body{margin:0;height:100%}a{position:fixed;left:0;top:0;width:160px;
 height:80px;display:block;background:#334;color:#fff;font:16px system-ui}</style>
 <a id="again" href="/download?again">download again</a>"""
+        elif self.path.startswith('/permission'):
+            # Chromium asks before a page may post notifications; the answer
+            # ends up in the title so the test can see what the page received.
+            body = b"""<!doctype html><meta charset=utf-8><title>permission-fixture</title>
+<script>
+Notification.requestPermission().then(function (result) {
+  document.title = 'perm:' + result + location.search;
+});
+</script><h1>Permission</h1>"""
+            content_type = "text/html; charset=utf-8"
         elif self.path == '/hint-target':
             body = b"<!doctype html><meta charset=utf-8><title>hint-target</title><h1>Link followed</h1>"
         elif self.path == '/features':
@@ -152,6 +162,7 @@ try:
             ("management", "gui-management.el"),
             ("crash-fixture", "gui-crash.el"),
             ("chromel-emacs-restored", "gui-download.el"),
+        ("chromel-emacs-restored", "gui-permission.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:

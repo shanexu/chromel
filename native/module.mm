@@ -3,6 +3,7 @@
 #include <emacs-module.h>
 #include "chromel_core.h"
 #include "downloads.h"
+#include "permissions.h"
 #include <cstdio>
 #include <cstring>
 #include <exception>
@@ -31,7 +32,7 @@ emacs_value signalText(emacs_env* env, const char* text) {
   env->non_local_exit_signal(env, env->intern(env, "error"), list);
   return env->intern(env, "nil");
 }
-enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory };
+enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory, PermissionReply };
 emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexcept {
  @autoreleasepool {
   emacs_value nilValue = env->intern(env, "nil");
@@ -49,6 +50,7 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
     if (op == Layout) for (int i = 0; i < 6; ++i) numbers[i] = integer(i);
     if (op == Hide || op == Command || op == Inspect) numbers[0] = integer(0);
     if (op == Command) { first = string(1); second = string(2); }
+    if (op == PermissionReply) { numbers[0] = integer(0); first = string(1); }
     if (env->non_local_exit_check(env) != emacs_funcall_exit_return) return nilValue;
     switch (op) {
       case Init: chromel::initialize(first, second); break;
@@ -58,6 +60,9 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
       case Hide: chromel::hide(numbers[0]); break;
       case Command: chromel::command(numbers[0], first, second); break;
       case Pump: chromel::pump(); break;
+      case PermissionReply:
+        chromel::permission_reply(static_cast<uint64_t>(numbers[0]), first == "allow");
+        break;
       case Events: return result(env, chromel::events());
       case Info: return result(env, chromel::info());
       case HintsScript: return result(env, chromel::hints_script());
@@ -103,6 +108,7 @@ extern "C" int emacs_module_init(emacs_runtime* runtime) noexcept {
     {"info", 0, Info, "Return native runtime diagnostics."},
     {"hints-script", 0, HintsScript, "Return the embedded hint overlay JavaScript."},
     {"set-download-directory", 1, SetDownloadDirectory, "Choose where downloads are written."},
+    {"permission-reply", 2, PermissionReply, "Answer a parked permission prompt: id, allow or deny."},
     {"bundle-path", 0, BundlePath, "Return the bundle this process runs in."},
     {"pump-pending", 0, PumpPending, "Return 1 when CEF has work scheduled for the message loop."},
     {"inspect", 1, Inspect, "Return actual Cocoa geometry and focus state of browser ID as JSON."},
