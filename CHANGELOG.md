@@ -13,7 +13,7 @@
 - IPC 参数在解引用前检查；`OnBeforeBrowse` 尊重 `userGesture`：特权 `chrome://` 页面必须由用户手势触发（Web Store 交接保留）。
 - 设置页 URL 判定收敛到 native 单一来源，Elisp 不再维护第二套正则。
 - `--no-sandbox` 未引入；`info()` 不再硬编码 "Sandbox: enabled"，而是报告真实情况。
-- 广告与追踪拦截默认生效：新公开的 `GetResourceRequestHandler` 在 IO 线程上用内置域名表（`data/blocklist.txt`，uBOL 七套 ruleset 编译，109,619 条）取消请求，`allow` 规则优先；`chromel-blocklist-file` 可换名单，`M-x chromel-blocker-toggle-site`（`C-u` 升父域）按站点关掉并记住。第一版只匹配域名，路径/正则类规则不生效（文件头 `dropped(pattern)` 记录条数），`third-party` 标记未参与判断。
+- 广告与追踪拦截默认生效：新公开的 `GetResourceRequestHandler` 在 IO 线程上用内置域名表（`data/blocklist.txt`，uBOL 九套 ruleset 编译，110,616 条）取消请求，`allow` 规则优先；`chromel-blocklist-file` 可换名单，`M-x chromel-blocker-toggle-site`（`C-u` 升父域）按站点关掉并记住。第一版只匹配域名，路径/正则类规则不生效（文件头 `dropped(pattern)` 记录条数），`third-party` 标记未参与判断。
 - 渲染进程崩溃时不再留下白屏：`Client::OnRenderProcessTerminated` 上报 `crashed`，标签切到 `data:text/html` 错误页（含 `status`/`code`/原因），`r` 回到崩溃前的 URL，`mode-line` 期间显示 `Crashed`。
 
 ### 交互

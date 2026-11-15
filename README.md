@@ -287,7 +287,7 @@ Chromel 带一份 uBOL（uBlock Origin Lite）三套列表的编译快照，**�
 
 | 项目 | 值 |
 | --- | --- |
-| 快照 | `data/blocklist.txt`（uBOL 提交 `a58a26f1`，七套 ruleset 编译成 109,619 条域名规则，2.8 MB） |
+| 快照 | `data/blocklist.txt`（uBOL 提交 `a58a26f1`，九套 ruleset 编译成 110,616 条域名规则，2.9 MB） |
 | 规则来源 | `ublock-filters`、`easylist`、`easyprivacy` |
 | 生效范围 | 域名与发起站点；`allow` 规则优先于 `block` |
 | 拦截位置 | 浏览器进程的请求链上，请求根本不会发出 |
