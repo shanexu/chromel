@@ -158,7 +158,7 @@ native 侧不回调 Lisp（CEF 的回调可能来自任意线程），而是**�
 
 ```objc
 void emit(int id, NSString* type, NSString* value) {
-  if (!id) return;                       // 0 = 设置窗口/DevTools，不回报
+  if (!id) return;                       // 0 = 设置窗口命令，不回报
   [queue addObject:@{@"id": @(id), @"type": type, @"value": value}];
 }
 ```
@@ -390,7 +390,7 @@ GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、
 
 - **标签是 Emacs 的 buffer/window，不是 Chromium 的 TabStrip**：所以没有 Chromium 的标签栏、标签组、标签搜索；
 - **`window.opener` 不保留**：页面弹窗被转成新 buffer，脚本依赖 opener 的会话会失效；
-- **DevTools 事件不回传**：DevTools 用 `Client(0)`，`emit()` 对 id 0 直接返回，窗口能开但 Elisp 收不到其事件；
+- **DevTools 只回传弹窗**：DevTools 窗口有自己的 `DevToolsClient(owner)`，在浏览器注册表里占一项（`shutdown()` 与计数都依赖它）；除“用户在 DevTools 里点开链接”会按所属页面开新标签外，它的 title/URL/焦点等事件不回报——那些属于检查器，没有对应的 Emacs buffer；
 - **设置窗口一次一个**：已打开时再请求另一个 `chrome://` 页面不会切换 target（既有行为）；
 - **不做 Chrome 同步/书签/下载管理**：这些功能需要 Google 账号体系，当前版本有意不实现；
 - **CEF 版本固定**：`cef.lock.json` 锁定版本与 SHA-1，升级需要重新构建并跑完整套件（API/行为差异主要出现在 `CefWindowInfo`、runtime style 与 sandbox）。

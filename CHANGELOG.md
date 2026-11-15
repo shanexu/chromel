@@ -25,6 +25,10 @@
 - `chromel-allow-raw-javascript`：为"只发不收"的 JS 动作提供开关。
 - 受管页面（设置/密码/扩展/Web Store）在独立窗口中打开，普通网页继续嵌入 Emacs。
 
+### 交互
+
+- DevTools 窗口改用专用 `DevToolsClient(owner)`：在 DevTools 里点开的链接会按所属页面打开新标签，不再是点了没反应；其余检查器事件仍不回传（没有对应 buffer）。
+
 ### 测试与构建
 
 - GUI 套件启动前先构建 `chromel-module`；编译失败立即退出，避免用上一次的 dylib 跑出假绿。

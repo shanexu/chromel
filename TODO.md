@@ -52,8 +52,10 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 ### B2 ✅ 空队列不再做 JSON 往返
 `events()` 在 `requireReady()` 之后直接 `if (queue.count == 0) return "[]";`，空闲 tick 不再走 `NSJSONSerialization`。返回值与序列化空数组完全一致（`gui-*` 的 `--chromel-last` / 事件处理未受影响，ERT 35/35）。
 
-### B3 DevTools 是死路
-`native/chromel_core.mm:1060` 用 `new Client(0)`，而 `emit()` 对 id 0 直接返回（`:126-127`），`pageFor(0)` 也无效——DevTools 窗口不产生任何事件。**做法**：给 DevTools 专门 client/负 id，或显式声明"仅供人工调试、不参与事件"。
+### B3 ✅ DevTools 有了自己的 client
+原先 `ShowDevTools(wi, new Client(0), …)`：id 0 会让 `emit()` 直接返回，`pageFor(0)` 也无效，于是 DevTools 里的链接点了没反应。
+现在 `DevToolsClient(int owner)`（`native/chromel_core.mm`）：自己维护 `OnAfterCreated`/`OnBeforeClose` 的注册表项，**只**把“用户在 DevTools 里点开的链接”按所属页面回报为 `popup`/`popup-background`，其余事件（title/url/focus）仍然丢弃——它们属于检查器，不属于页面。
+**验证**：`./scripts/build.sh` 零警告；ERT 35/35；`CHROMEL_TEST_ONLY=smoke,controls,features` GUI 全绿。手工探针（经 `scripts/launch.sh`）：加载后 `Pages:1 / Browsers:1` → 开 DevTools `Pages:1 / Browsers:2` → 关页面 `Pages:0 / Browsers:0`；同一探针在改动前的 master 上得到完全相同的计数，说明注册表行为未变，改的只是事件归属。
 
 ### B4 hints.js 每次 follow 从磁盘读
 `chromel.el:838-840` 每次 `insert-file-contents "native/hints.js"`，而 `scroll.js` 是构建期内嵌（`CMakeLists.txt:32-34`）。**做法**：统一由 CMake 生成头文件，Elisp 侧只取字符串。
