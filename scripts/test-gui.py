@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 """Test isolated GUI Emacs instances: persistence, layout, hints and controls."""
+import base64
 import http.server
 import json
 import os
@@ -109,6 +110,18 @@ Notification.requestPermission().then(function (result) {
                     b"style=\"position:fixed;left:0;top:0;width:400px;height:200px;"
                     b"font-size:20px\">")
             content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/blocker'):
+            # The page lives on 127.0.0.1; the image it embeds lives on
+            # 127.0.0.2, so the blocklist can cancel exactly one of them and the
+            # browser still knows how to reach the other.
+            body = (f"<!doctype html><title>blocker-fixture</title>"
+                    f"<img src=\"http://localhost:{self.server.server_port}/ad.png\" "
+                    "onload=\"document.title='ad-loaded'\" "
+                    "onerror=\"document.title='ad-blocked'\">").encode()
+            content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/ad.png'):
+            body = ONE_PIXEL_PNG
+            content_type = "image/png"
         elif self.path == '/hint-target':
             body = b"<!doctype html><meta charset=utf-8><title>hint-target</title><h1>Link followed</h1>"
         elif self.path == '/features':
@@ -145,6 +158,11 @@ Notification.requestPermission().then(function (result) {
         pass
 
 
+# 1x1 transparent PNG: the blocked/unblocked image in the blocker fixture.
+ONE_PIXEL_PNG = base64.b64decode(
+    "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=="
+)
+
 server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), Fixture)
 threading.Thread(target=server.serve_forever, daemon=True).start()
 url = f"http://127.0.0.1:{server.server_port}/fixture"
@@ -175,6 +193,7 @@ try:
             ("chromel-emacs-restored", "gui-permission.el"),
             ("chromel-emacs-restored", "gui-proxy.el"),
             ("paste-fixture", "gui-paste.el"),
+            ("blocker-fixture", "gui-blocker.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:
@@ -189,7 +208,7 @@ try:
         for expected, script in tests:
             route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
                      'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html',
-                     'gui-paste.el': '/paste'}.get(script, '/fixture')
+                     'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker'}.get(script, '/fixture')
             test_url = url.replace('/fixture', route)
             result = pathlib.Path(temp) / "result"
             result.unlink(missing_ok=True)
