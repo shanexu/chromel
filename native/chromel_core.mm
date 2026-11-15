@@ -44,7 +44,6 @@ CefRefPtr<CefRegistration> settingsTestObserver;
 std::string settingsTestResult;
 bool settingsTestSuccess = false;
 NSMutableArray<NSDictionary*>* queue;
-NSMapTable<NSNumber*, NSWindow*>* windows;
 bool initialized = false;
 bool stopped = false;
 bool pumping = false;
@@ -122,20 +121,13 @@ std::string utf8(NSString* s) { return s ? std::string(s.UTF8String ?: "") : "";
 void checkThread() {
   if (![NSThread isMainThread]) throw std::runtime_error("CEF must run on the Cocoa main thread");
 }
-void requireReady() {
-  checkThread();
-  if (!initialized || stopped) throw std::runtime_error("CEF is not running");
-}
+// page.mm lives in another translation unit; it can still ask the same
+// question without duplicating the message or the state it reads.
+void requireReady() { requireBackendReady(); }
 void emit(int id, NSString* type, NSString* value = @"") {
   if (!id) return;
   // Every callback used here is delivered on the CEF UI (Cocoa main) thread.
   [queue addObject:@{@"id": @(id), @"type": type, @"value": value ?: @""}];
-}
-NSWindow* windowFor(long handle) {
-  NSWindow* win = [windows objectForKey:@(handle)];
-  if (!win || ![NSApp.windows containsObject:win])
-    throw std::runtime_error("Emacs frame no longer exists");
-  return win;
 }
 // CEF may hand out a null or detached main frame while a page is tearing down.
 // Every caller must tolerate that instead of dereferencing it.
@@ -662,6 +654,15 @@ NSEvent* routeKeyEvent(NSEvent* event) {
 }
 }  // namespace
 
+void requireBackendReady() {
+  checkThread();
+  if (!initialized || stopped) throw std::runtime_error("CEF is not running");
+}
+
+// The elisp side only ever needs a CefClient, so page.mm asks for one by id
+// instead of including this translation unit's private Client class.
+CefRefPtr<CefClient> makePageClient(int id) { return new Client(id); }
+
 namespace chromel {
 void initialize(const std::string& bundle, const std::string& profile) {
   checkThread();
@@ -772,83 +773,6 @@ std::string bundle_path() {
   @autoreleasepool { return utf8(NSBundle.mainBundle.bundlePath); }
 }
 
-int create(long handle, const std::string& url) {
-  requireReady();
-  NSWindow* win = windowFor(handle);
-  auto page = std::make_shared<Page>();
-  page->id = nextId++;
-  page->host = win.contentView;
-  page->container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
-  page->container.wantsLayer = YES;
-  page->container.hidden = YES;
-  [page->host addSubview:page->container];
-  pages[page->id] = page;
-  CefWindowInfo windowInfo;
-  // Let CEF own a permanently hidden lifecycle window so its public close
-  // path remains usable after embedding.  Only its child NSView is displayed
-  // in Emacs; there is no external overlay or window-position tracking.
-  windowInfo.hidden = true;
-  windowInfo.bounds = CefRect(0, 0, 1, 1);
-  windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
-  CefBrowserSettings settings;
-  CefRefPtr<Client> client(new Client(page->id));
-  page->browser = CefBrowserHost::CreateBrowserSync(windowInfo, client, url, settings, nullptr, nullptr);
-  if (!page->browser) {
-    [page->container removeFromSuperview];
-    pages.erase(page->id);
-    throw std::runtime_error("CEF browser creation failed");
-  }
-  // CEF owns its view; the clipping container belongs to this plugin.
-  NSView* view = (__bridge NSView*)page->browser->GetHost()->GetWindowHandle();
-  if (!view) {
-    // OnAfterCreated already registered this browser; without closing it the
-    // renderer outlives the session and shutdown() can never reach CefShutdown.
-    browsers.erase(page->browser->GetIdentifier());
-    page->browser->GetHost()->CloseBrowser(true);
-    [page->container removeFromSuperview];
-    page->lifetimeWindow = nil;
-    pages.erase(page->id);
-    throw std::runtime_error("CEF created a browser without a Cocoa view");
-  }
-  page->lifetimeWindow = view.window;
-  [view removeFromSuperview];
-  [page->container addSubview:view];
-  view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
-  return page->id;
-}
-
-void layout(int id, long handle, double x, double y, double width, double height) {
-  requireReady();
-  auto page = pageFor(id);
-  NSView* host = windowFor(handle).contentView;
-  if (page->host != host) {
-    unfocus(page);
-    [page->container removeFromSuperview];
-    page->host = host;
-    [host addSubview:page->container];
-  }
-  // Emacs pixel edges on NS are logical points; multiplying by Retina scale
-  // would double the size.  Convert from top-left only for unflipped hosts.
-  const double cy = host.isFlipped ? y : NSHeight(host.bounds) - y - height;
-  NSRect rect = NSMakeRect(x, cy, std::max(0.0, width), std::max(0.0, height));
-  if (!NSEqualRects(page->container.frame, rect)) {
-    page->container.frame = rect;
-    NSView* view = page->browser ? (__bridge NSView*)page->browser->GetHost()->GetWindowHandle() : nil;
-    if (view) {
-      view.frame = page->container.bounds;
-      page->browser->GetHost()->NotifyMoveOrResizeStarted();
-    }
-  }
-  page->container.hidden = width <= 0 || height <= 0;
-}
-
-void hide(int id) {
-  requireReady();
-  auto page = pageFor(id);
-  unfocus(page);
-  page->container.hidden = YES;
-  page->selected = false;
-}
 
 namespace {
 

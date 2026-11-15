@@ -5,6 +5,7 @@
 #include <memory>
 #include <string>
 #include "include/cef_browser.h"
+#include "include/cef_client.h"
 
 // One embedded page and the Cocoa view that hosts it.  This is the state the
 // rest of the backend passes around by id, so it lives in its own header
@@ -35,10 +36,20 @@ struct Page {
 extern std::map<int, std::shared_ptr<Page>> pages;
 extern std::map<int, CefRefPtr<CefBrowser>> browsers;
 extern int nextId;
+// Weak, keyed by the frame handle the elisp side passes in.
+extern NSMapTable<NSNumber*, NSWindow*>* windows;
 
+NSWindow* windowFor(long handle);
+// Main thread + initialized + not shut down; the same check every entry point
+// in chromel_core.mm performs before touching CEF.
+void requireBackendReady();
 std::shared_ptr<Page> pageFor(int id);
 bool ownsFocus(const std::shared_ptr<Page>& page);
 void stopScroll(const std::shared_ptr<Page>& page, bool cancel = true);
 void scrollPage(const std::shared_ptr<Page>& page, CefRefPtr<CefFrame> frame,
                 double amount, int duration, int speed, const std::string& mode, bool held);
 void unfocus(const std::shared_ptr<Page>& page);
+
+// Implemented next to Client, which needs the whole backend; page.mm only
+// needs something to hand to CreateBrowserSync.
+CefRefPtr<CefClient> makePageClient(int id);
