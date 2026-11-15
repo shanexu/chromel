@@ -281,6 +281,27 @@ Allow https://example.org/ to use location? (y or n)
 
 答案只活在这次 Emacs 会话里：Chromel 不写自己的权限数据库，重启后同一来源会重新询问（除非 Chromium 自己缓存了该决定）。摄像头/麦克风真正要拿到设备流还需要 `--enable-media-stream` 之类的开关，权限放行只是不再被静默拒绝。
 
+## 代理（PAC）
+
+Chromium 对每个请求问一次 PAC 脚本「走不走代理」，所以"哪些域名走代理"由文件决定。把 PAC 路径告诉 Chromel：
+
+```elisp
+(setq chromel-proxy-pac-file (expand-file-name "~/chromel/proxy.pac"))
+```
+
+从 SmartProxy 的完整备份生成这个文件（保留规则顺序，未匹配的主机直连）：
+
+```sh
+python3 scripts/smartproxy-to-pac.py ~/Downloads/SmartProxy-FullBackup.json \
+    -o ~/chromel/proxy.pac
+```
+
+生成的文件头会写明来源、profile 和生效规则数；`--profile` 换一个 profile，`--default-proxy` 让未匹配的主机也走默认服务器。
+
+Chromium 只在浏览器进程启动时读一次 PAC，所以**改完要重启 Emacs**：CEF 没有 `chrome.proxy` 的等价物，运行时换规则做不到。另外，这个构建不会去取 `file://` 的 PAC（失败后静默退回直连），所以给文件路径时由 Chromel 在 `127.0.0.1` 上起一个只回答 `/proxy.pac` 的临时 HTTP 服务喂给 Chromium；直接给 `http(s)://` 地址则原样使用。
+
+几点边界：PAC 是进程级的，设置窗口和 DevTools 一样走它；脚本里拿不到凭据，需要认证的代理会收到 407；Chromium 调用脚本前会裁掉 https 的 path，路径类规则只对 http 有效。
+
 ## 数据和能力边界
 
 默认数据在 `~/.emacs.d/chromel/`（实际相对 `user-emacs-directory`）：
@@ -304,6 +325,7 @@ chromel/
 - CEF helper 保持 Chromium 沙箱开启，没有添加 `--no-sandbox` 或绕过证书校验的参数。
 - `chromel-allow-raw-javascript`（默认 `t`）控制 `javascript` 动作：它把脚本丢给主帧后**不等待结果**，适合"点一下"式的临时操作，但返回值会被丢弃。需要结果时用 `chromel--eval` 那条带 token 的往返通道。设为 `nil` 后相关命令会直接报 `user-error`，适合把浏览视为只读的场景。
 - 目前支持 NS/Cocoa Emacs，不支持终端 Emacs、Linux、GNUstep 或 emacs-mac port。
+- 代理只有 PAC 这一条路（进程级、启动时读一次），没有运行时切换、按标签页代理或自动测速。
 
 ## 许可证
 

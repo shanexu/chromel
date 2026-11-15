@@ -59,17 +59,23 @@
              "The again fixture did not load" 20)
             ;; The click is synthetic: if it lands before the layer below the
             ;; cursor is composited, nothing happens, so knock again.
+            (sit-for 0.5)
             (let ((wanted (chromel-test--file "chromel-fixture (1).txt"))
                   (attempt 0))
+              ;; Wait without signalling: a miss is retried, not fatal.
               (while (and (< attempt 3) (not (file-exists-p wanted)))
                 (cl-incf attempt)
                 (with-current-buffer second
                   (chromel--command
                    "click" (chromel--json (list :x 40 :y 30 :newBuffer :false))))
-                (chromel-test--until (lambda () (file-exists-p wanted))
-                                     (format "A second download did not get a unique name (attempt %d)"
-                                             attempt)
-                                     8)))))
+                (let ((deadline (+ (float-time) 8)))
+                  (while (and (< (float-time) deadline)
+                              (not (file-exists-p wanted)))
+                    (accept-process-output nil 0.1))))
+              (chromel-test--assert
+               (file-exists-p wanted)
+               (format "A second download did not get a unique name (attempts %d)"
+                       attempt)))))
         (chromel-test--finish t "downloads saved with unique names"))
     (error (chromel-test--finish nil (error-message-string error)))))
 (run-at-time 1 nil #'chromel-test--run)

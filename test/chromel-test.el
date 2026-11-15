@@ -632,3 +632,42 @@
        (chromel-test--permission-payload 9 "https://example.org" '("camera" "microphone"))))
     (should-not asked)
     (should (equal replies '((9 . "deny"))))))
+
+(defun chromel-test--http-get (port path)
+  "Return the body of GET PATH from 127.0.0.1:PORT."
+  (let* ((response "")
+         (process (make-network-process
+                   :name "chromel-pac-client" :host "127.0.0.1" :service port
+                   :family 'ipv4 :coding 'binary
+                   :filter (lambda (_proc chunk)
+                             (setq response (concat response chunk)))
+                   :sentinel #'ignore)))
+    (process-send-string
+     process (format "GET %s HTTP/1.0\r\nHost: 127.0.0.1\r\n\r\n" path))
+    (let ((deadline (+ (float-time) 5)))
+      (while (and (< (float-time) deadline) (process-live-p process))
+        (accept-process-output process 0.05)))
+    (when (process-live-p process) (delete-process process))
+    (cadr (split-string response "\r\n\r\n"))))
+
+(ert-deftest chromel-pac-url-serves-files-on-loopback ()
+  "A path is served over loopback HTTP; a URL is passed through; nil is direct."
+  (should (equal (chromel--pac-url nil) ""))
+  (should (equal (chromel--pac-url "http://example.org/proxy.pac")
+                 "http://example.org/proxy.pac"))
+  (let ((file (make-temp-file "chromel-pac" nil ".pac"))
+        (body "function FindProxyForURL(url, host) { return \"DIRECT\"; }\n"))
+    (unwind-protect
+        (progn
+          (with-temp-file file (insert body))
+          (let ((url (chromel--pac-url file)))
+            (should (string-match-p
+                     "\\`http://127\\.0\\.0\\.1:[0-9]+/proxy\\.pac\\'" url))
+            (should (equal (chromel-test--http-get
+                            (process-contact chromel--pac-server :service)
+                            "/proxy.pac")
+                           body))))
+      (when (process-live-p chromel--pac-server)
+        (delete-process chromel--pac-server))
+      (setq chromel--pac-server nil)
+      (delete-file file))))

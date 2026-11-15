@@ -163,6 +163,7 @@ try:
             ("crash-fixture", "gui-crash.el"),
             ("chromel-emacs-restored", "gui-download.el"),
         ("chromel-emacs-restored", "gui-permission.el"),
+            ("chromel-emacs-restored", "gui-proxy.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:
