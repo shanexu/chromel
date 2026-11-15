@@ -1,16 +1,17 @@
 # `blocklist.txt`
 
-A compiled snapshot of the three uBOL filter lists Chromel ships: `ublock-filters`,
-`easylist`, `easyprivacy`. It is committed so that a fresh checkout blocks ads
+A compiled snapshot of the uBOL rulesets Chromel ships: `ublock-filters`,
+`ublock-badware`, `easylist`, `easyprivacy`, `urlhaus-full`, `pgl` and `chn-0`
+(AdGuard Chinese). It is committed so that a fresh checkout blocks ads
 without any setup step; `chromel-blocklist-file` defaults to this file.
 
-Current snapshot: uBOL commit `a58a26f1` (2026-11-13), 97,334 host rules, 2.6 MB.
+Current snapshot: uBOL commit `a58a26f1` (2026-11-13), 109,619 host rules, 2.8 MB.
 The header of the file records the same facts.
 
 ## Regenerating
 
 `raw.githubusercontent.com` is blocked from some machines; the blobs API works
-everywhere GitHub is reachable. Fetch the three rulesets by their tree SHAs:
+everywhere GitHub is reachable. Fetch the rulesets by their tree SHAs:
 
 ```bash
 cd /tmp
@@ -18,7 +19,8 @@ curl -sS "https://api.github.com/repos/uBlockOrigin/uBOL-home/git/trees/main?rec
 python3 - <<'PY'
 import base64, json, urllib.request
 tree = json.load(open('/tmp/tree.json'))['tree']
-want = {'ublock-filters', 'easylist', 'easyprivacy'}
+want = {'ublock-filters', 'ublock-badware', 'easylist', 'easyprivacy',
+        'urlhaus-full', 'pgl', 'chn-0'}
 for t in tree:
     name = t['path'].split('/')[-1][:-5]
     if t['path'].startswith('chromium/rulesets/main/') and t['path'].endswith('.json') and name in want:
@@ -33,7 +35,8 @@ Then compile and check the header:
 
 ```bash
 cd /path/to/chromel
-python3 scripts/ubol-to-blocklist.py /tmp/ublock-filters.json /tmp/easylist.json /tmp/easyprivacy.json \
+python3 scripts/ubol-to-blocklist.py /tmp/ublock-filters.json /tmp/ublock-badware.json \
+  /tmp/easylist.json /tmp/easyprivacy.json /tmp/urlhaus-full.json /tmp/pgl.json /tmp/chn-0.json \
   -o data/blocklist.txt --label "uBlockOrigin/uBOL-home@<commit> chromium/rulesets/main/... generated <date>"
 head -3 data/blocklist.txt
 ```
@@ -42,6 +45,14 @@ Record the uBOL commit in `--label`; the number that matters is `emitted`, which
 must stay in the same ballpark (a large drop means uBOL changed a field name and
 the compiler needs updating). Restart Emacs after replacing the file — the list
 is read once, when CEF starts.
+
+## Lists uBOL does not ship
+
+`uBlock filters – Privacy`, `– Quick fixes` and `– Unbreak` are uBO lists with
+no declarativeNetRequest ruleset in uBOL (its `ruleset-details.json` has 56
+entries and none of them is one of these), so they cannot be part of this
+snapshot. Blocking rules from them that are host-shaped may still arrive through
+`ublock-filters`, whose uBOL name is "Ads, trackers, and more".
 
 ## Why some rules are missing
 
