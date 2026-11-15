@@ -13,6 +13,7 @@
 - IPC 参数在解引用前检查；`OnBeforeBrowse` 尊重 `userGesture`：特权 `chrome://` 页面必须由用户手势触发（Web Store 交接保留）。
 - 设置页 URL 判定收敛到 native 单一来源，Elisp 不再维护第二套正则。
 - `--no-sandbox` 未引入；`info()` 不再硬编码 "Sandbox: enabled"，而是报告真实情况。
+- 渲染进程崩溃时不再留下白屏：`Client::OnRenderProcessTerminated` 上报 `crashed`，标签切到 `data:text/html` 错误页（含 `status`/`code`/原因），`r` 回到崩溃前的 URL，`mode-line` 期间显示 `Crashed`。
 
 ### 交互
 

@@ -179,6 +179,7 @@ Elisp 每 tick 调一次 `chromel--native-events`，native 把整个队列 `NSJS
 | `popup-page` | 页面弹出了一个真实弹窗（JSON `{id,url,background}`），新页面已由 native 建好 |
 | `popup` / `popup-background` | 弹窗兜底：native 拒绝托管时把 URL 交给 Elisp 开新标签 |
 | `eval` | JS 求值结果（带 token） |
+| `crashed` | 渲染进程死了（JSON `{status, code, message}`），页面已不可用 |
 | `closed` | 浏览器已销毁 |
 
 队列是**单生产者/单消费者**：CEF 回调发生在主线程的泵调用内，Elisp 也在主线程取，因此不需要锁。
@@ -269,6 +270,8 @@ Chromel 在 `NSApplication` 上 swizzle 了 `sendEvent:`：
 - 因为弹窗是 CEF 自己创建的，`window.opener` 与 `postMessage` 都保持；`gui-features` 里有断言：子页面必须能读到 `window.opener.document.title`。注意 Chromium 88 起 `target=_blank` 默认带 `noopener`，测试 fixture 用 `rel="opener"` 显式打开。
 - native 拒绝托管（例如 opener 已经关掉）时退回旧路径：发 `popup` / `popup-background`，由 Elisp 开新标签，此时没有 opener。
 - `chrome://settings`、`chrome://extensions`、`chrome://password-manager`、Chrome Web Store 走**独立顶层窗口**（`CEF_RUNTIME_STYLE_CHROME` + 工具栏），因为它们需要 Chrome 的 WebUI 资源与窗口级 UI。判定由 native 的 `is_settings_url()` 单点负责，Elisp 通过 `chromel--native-is-settings-url` 调用，避免两套规则漂移。
+- 渲染进程崩溃（OOM、SIGSEGV、被 `kill -9`）时，`Client::OnRenderProcessTerminated` 发 `crashed`。`OnBeforeClose` 不会来——浏览器对象还活着，只是没有渲染进程——所以 Elisp 不销毁标签，而是记住当前 URL、清掉 find 状态、把标签导航到一张 `data:text/html` 错误页（说明原因并提示 `r`）。`chromel-reload` 见到崩溃标记时不是 `reload`（那会重载错误页），而是 `navigate` 回崩溃前的地址。`data:` 页不进历史（历史只收 `https?://`）。
+- `chrome://crash` 是 Chrome 层 URL，CEF 不提供，所以崩溃回归只能靠外部杀进程：`test/gui-crash.el` 用 `ps` 找 `--type=renderer` 子进程并 `kill -9`。
 - 页面发起的导航若指向 `chrome://` 受管页面，要求 `userGesture` 才放行（防止恶意重定向打开特权页面）；指向 Web Store 的则允许（这是项目刻意保留的扩展安装路径）。
 
 ### 4.11 hints（f 键）

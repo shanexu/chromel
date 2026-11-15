@@ -506,3 +506,35 @@
     (should-error (chromel--check-module-api) :type 'user-error))
   (cl-letf (((symbol-function 'chromel--native-api-version) (lambda () 99)))
     (should-error (chromel--check-module-api) :type 'user-error)))
+
+(ert-deftest chromel-crash-event-shows-a-retry-page-and-reload-returns ()
+  "A dead renderer must leave a page the user can act on, not a blank tab."
+  (with-temp-buffer
+    (chromel-mode)
+    (setq chromel--id 4242 chromel--url "https://example.test/page")
+    (puthash 4242 (current-buffer) chromel--pages)
+    (unwind-protect
+        (let (calls)
+          (cl-letf (((symbol-function 'chromel--command)
+                     (lambda (action &optional argument) (push (cons action argument) calls))))
+            (chromel--handle-event
+             (list :id 4242 :type "crashed"
+                   :value "{\"status\":3,\"code\":-3,\"message\":\"boom\"}"))
+            (should chromel--crashed)
+            (should (equal chromel--crashed-url "https://example.test/page"))
+            (should (equal (caar calls) "navigate"))
+            (should (string-prefix-p "data:text/html" (cdar calls)))
+            (should (string-match-p "boom" (url-unhex-string (cdar calls))))
+            (setq calls nil)
+            (chromel-reload)
+            (should-not chromel--crashed)
+            (should (equal calls '(("navigate" . "https://example.test/page"))))))
+      (remhash 4242 chromel--pages))))
+
+(ert-deftest chromel-crash-reason-prefers-the-backend-message ()
+  "Explain a crash in words; fall back gracefully when the payload is odd."
+  (should (equal (chromel--crash-reason "{\"status\":9,\"code\":0,\"message\":\"\"}")
+                 "Renderer exited (status 9, code 0)"))
+  (should (equal (chromel--crash-reason "{\"status\":8,\"code\":-3,\"message\":\"Oops\"}")
+                 "Oops"))
+  (should (equal (chromel--crash-reason "not json") "Renderer exited")))

@@ -11,6 +11,10 @@ import threading
 
 root = pathlib.Path(__file__).resolve().parent.parent
 build = root / "build"
+# A stale chromel.elc shadows the source file (load prefers the compiled one),
+# so a run can silently test last week's elisp.  Delete them like CI does.
+for stale in root.rglob("*.elc"):
+    stale.unlink()
 module = build / "chromel-module.dylib"
 subprocess.run(["cmake", "-S", str(root), "-B", str(build)], check=True)
 # Build everything the GUI processes load, not just the probe: a failed compile
@@ -128,6 +132,7 @@ try:
             ("password-seed", "gui-passwords.el"),
             ("password-restore", "gui-passwords.el"),
             ("management", "gui-management.el"),
+            ("crash-fixture", "gui-crash.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:
@@ -141,7 +146,7 @@ try:
                 tests.insert(0, ("chromel-emacs-ready", "gui-smoke.el"))
         for expected, script in tests:
             route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
-                     'gui-scroll-modal.el': '/scroll-modal'}.get(script, '/fixture')
+                     'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html'}.get(script, '/fixture')
             test_url = url.replace('/fixture', route)
             result = pathlib.Path(temp) / "result"
             result.unlink(missing_ok=True)

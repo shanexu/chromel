@@ -97,7 +97,8 @@ Held j/k use `chromel-scroll-speed` after the initial step."
 (defvar chromel--initialized nil)
 (defvar chromel--timer nil)
 (defvar chromel--timer-delay nil
-  "Interval the running pump was armed with, so it is only rebuilt on a rate change.")
+  "Interval the running pump was armed with.
+Kept so the timer is rebuilt only when the rate actually changes.")
 (defvar chromel--quiet-ticks 0
   "Consecutive pumps CEF had nothing for.  Slowing down needs a run of them:
 flapping between 20 ms and 250 ms re-creates the timer and, with it, an
@@ -134,6 +135,10 @@ native side has finished tearing them down; pumping must continue until then.")
 (defvar-local chromel--url "")
 (defvar-local chromel--title "Browser")
 (defvar-local chromel--status "")
+(defvar-local chromel--crashed nil
+  "Non-nil after the page's renderer died; `chromel-reload' then retries it.")
+(defvar-local chromel--crashed-url nil
+  "URL to return to when reloading after a crash.")
 (defvar-local chromel--window nil)
 (defvar-local chromel--sent-selected nil)
 (defvar-local chromel--sent-geometry nil)
@@ -321,6 +326,14 @@ native side has finished tearing them down; pumping must continue until then.")
           ("loading" (setq chromel--status (if (equal value "1") "Loading" "")))
           ("loaded" (chromel--history-record chromel--url chromel--title))
           ("error" (setq chromel--status value))
+          ("crashed"
+           ;; The renderer is gone, so nothing else will arrive for this page.
+           ;; Keep the URL we were on and show a page the user can act on.
+           (unless (and chromel--url (string-prefix-p "data:" chromel--url))
+             (setq chromel--crashed-url chromel--url))
+           (setq chromel--crashed t chromel--status "Crashed; r to retry")
+           (chromel-find-clear)
+           (chromel--command "navigate" (chromel--crash-page value)))
           ("focus"
            (when (and (window-live-p chromel--window) (not (active-minibuffer-window)))
              (select-window chromel--window)))
@@ -387,7 +400,8 @@ page it is false and we only drain events at 250 ms."
        (= 1 (chromel--native-pump-pending))))
 
 (defun chromel--arm-tick (&optional delay immediate)
-  "Run the pump every DELAY seconds, restarting the timer only when the rate changes.
+  "Run the pump every DELAY seconds.
+The timer is restarted only when the rate changes.
 
 The timer repeats.  `chromel--eval' and `chromel--find-run' call `chromel--tick'
 directly while they wait, so a one-shot chain would leave a new timer behind on
@@ -565,7 +579,10 @@ One native view can occupy only one Emacs window at a time."
   (setq-local cursor-type nil)
   (setq-local truncate-lines t)
   (setq-local header-line-format chromel--header-line-format)
-  (setq-local mode-line-process '(:eval (concat " " chromel--status chromel--find-status)))
+  (setq-local mode-line-process
+              '(:eval (concat " "
+                              (if chromel--crashed "Crashed" chromel--status)
+                              chromel--find-status)))
   (add-hook 'kill-buffer-hook #'chromel--kill-buffer nil t)
   (add-hook 'change-major-mode-hook #'chromel--kill-buffer nil t)
   (let ((inhibit-read-only t))
@@ -863,7 +880,48 @@ settings through `current-kill', just as `yank' does."
     (when (kill-buffer source)
       (when (and next (memq next (chromel--buffers))) (chromel--select-buffer next)))))
 
-(defun chromel-reload () "Reload the current page." (interactive) (chromel--command "reload"))
+(defun chromel--crash-reason (detail)
+  "Return one sentence explaining why the renderer died.
+DETAIL is the backend's JSON payload; anything unreadable degrades to a
+generic sentence instead of an error."
+  (let* ((info (ignore-errors (json-parse-string detail :object-type 'plist)))
+         (message (and info (plist-get info :message)))
+         (status (and info (plist-get info :status)))
+         (code (and info (plist-get info :code))))
+    (cond ((and (stringp message) (not (string-empty-p message))) message)
+          ((numberp status) (format "Renderer exited (status %s, code %s)"
+                                    status (or code 0)))
+          (t "Renderer exited"))))
+
+(defun chromel--crash-page (detail)
+  "Return a data: URL describing a dead renderer.
+DETAIL is the backend's JSON; it is shown verbatim only after escaping."
+  (let* ((reason (chromel--crash-reason detail))
+         (html (format (concat "<meta charset=utf-8>"
+                               "<body style=\"margin:0;background:#23272e;color:#d8dee9;"
+                               "font:16px/1.7 -apple-system,sans-serif;padding:48px\">"
+                               "<h1 style=\"font-size:20px;margin:0 0 12px\">The page crashed</h1>"
+                               "<p style=\"margin:0 0 24px;color:#96a0ad\">%s</p>"
+                               "<p style=\"margin:0\">Press <b>r</b> to reload %s</p>")
+                       (chromel--escape-html (or reason "the renderer process died"))
+                       (chromel--escape-html (or chromel--crashed-url "the page")))))
+    (concat "data:text/html;charset=utf-8," (url-hexify-string html))))
+
+(defun chromel--escape-html (text)
+  "Return TEXT safe to interpolate into HTML."
+  (let ((table (list (cons ?& "&amp;") (cons ?< "&lt;") (cons ?> "&gt;")
+                     (cons ?\" "&quot;") (cons ?' "&#39;"))))
+    (apply #'concat
+           (mapcar (lambda (char) (or (cdr (assq char table)) (char-to-string char))) text))))
+
+(defun chromel-reload ()
+  "Reload the current page, or retry it after a renderer crash."
+  (interactive)
+  (if chromel--crashed
+      (let ((url chromel--crashed-url))
+        (setq chromel--crashed nil chromel--crashed-url nil chromel--status "Loading")
+        (if url (chromel--command "navigate" url) (chromel--command "reload")))
+    (chromel--command "reload")))
 (defun chromel-back () "Go back." (interactive) (chromel--command "back"))
 (defun chromel-forward () "Go forward." (interactive) (chromel--command "forward"))
 (defun chromel-stop () "Stop loading." (interactive) (chromel--command "stop"))

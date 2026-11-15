@@ -1,8 +1,8 @@
 # Chromel 待办
 
-快照：2026-11-06，分支 `p1-hardening`（= `master` = `origin/master`，提交 `9533404`）。
+快照：2026-11-15，分支 `topic/renderer-crash`（基于 `master` `0d078ed`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 28/28，`python3 scripts/test-gui.py` 19/19 连续两次全绿。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 37/37，`python3 scripts/test-gui.py` 21/21 全绿。
 
 ## 已完成（本轮）
 
@@ -154,6 +154,12 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ### C5 ✅ 泵的空闲判定改问 native
 `chromel_core.h` 新增 `int browser_count();`（只读 `browsers` + `settingsBrowsers`，**不**经 `requireReady`，CEF 未初始化时返回 0）；模块导出 `chromel--native-browser-count`；Elisp 新增 `chromel--native-has-browsers-p`，`chromel--pump-needed-p` 用它取代原先永不重置的 `chromel--settings-open`（该变量已删除）。`chromel-settings` 改为「先发 settings 命令、再 `chromel--ensure-timer`」，因为窗口是在那条命令里同步创建的。API 版本随之升到 2。ERT 新增 2 条并更新 2 条（无页面/无浏览器时停泵、设置窗口存在时继续泵、模块未加载时不问 native）。
 
+### C6 ✅ 渲染进程崩溃后只剩空白页
+渲染进程死掉时（内存耗尽、SIGSEGV、`kill -9`），Elisp 侧原先只能看到"不再有新事件"，页面冻结在白屏，用户没有任何提示。
+现在 `Client::OnRenderProcessTerminated` 上报 `crashed`（`{status, code, message}`），Elisp 记住崩溃前的 URL、清掉 find 状态，并把标签导航到一个 `data:text/html` 错误页（"The page crashed / Renderer exited (status 9, code 0) / Press r to reload …"）；`r`（`chromel-reload`）在有崩溃标记时导航回原 URL 并清标记，`mode-line-process` 期间固定显示 `Crashed`。
+`chrome://crash` 是 Chrome 层 URL，CEF 不提供（实测导航后无任何事件、URL 为空），所以回归手段是**自己杀渲染进程**：`test/gui-crash.el` 用 `ps` 找 `--type=renderer` 子进程并 `kill -9`，再断言出现错误页、`r` 能恢复。历史记录本来只收 `https?://`，`data:` 页不会污染它。
+**验证**：ERT 37/37（新增事件路径与 `chromel--crash-reason` 两条）；`CHROMEL_TEST_ONLY=crash` PASS；完整套件 21/21。
+
 ## D. 文档
 
 - ✅ `docs/architecture.md`：分层、外部消息泵、视图嵌入与坐标系、事件/命令、JS 往返、键盘双路径、焦点、生命周期、不变量、扩展点（README 顶部已链入）。
@@ -166,7 +172,7 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 ```bash
 ./scripts/build.sh                       # 0 warning
 emacs --batch -L . -L test -l test/chromel-test.el -f ert-run-tests-batch-and-exit
-python3 scripts/test-gui.py              # 19 项，约 4-5 分钟，会抢焦点
+python3 scripts/test-gui.py              # 21 项，约 5 分钟，会抢焦点
 CHROMEL_TEST_ONLY=smoke,hints python3 scripts/test-gui.py   # 子集
 ```
 
