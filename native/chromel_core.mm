@@ -254,6 +254,45 @@ class App final : public CefApp, public CefBrowserProcessHandler {
 bool isSettingsURL(const std::string& url);
 bool isPrivilegedChromeURL(const std::string& url);
 
+// Chromium's DevTools window is a browser of its own: it has no Emacs buffer and
+// no entry in `pages`.  It still needs a client so the browser registry stays
+// honest (shutdown and the "Browsers including DevTools" count) and so links the
+// user clicks inside the inspector can leave the window instead of dying.
+class DevToolsClient final : public CefClient,
+                             public CefLifeSpanHandler,
+                             public CefRequestHandler {
+ public:
+  explicit DevToolsClient(int owner) : owner_(owner) {}
+  CefRefPtr<CefLifeSpanHandler> GetLifeSpanHandler() override { return this; }
+  CefRefPtr<CefRequestHandler> GetRequestHandler() override { return this; }
+  void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
+    CEF_REQUIRE_UI_THREAD();
+    browsers[browser->GetIdentifier()] = browser;
+  }
+  void OnBeforeClose(CefRefPtr<CefBrowser> browser) override {
+    CEF_REQUIRE_UI_THREAD();
+    // OnAfterCreated owns this entry; nothing in `pages` ever did.
+    browsers.erase(browser->GetIdentifier());
+  }
+  bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
+                     const CefString& url, const CefString&, WindowOpenDisposition disposition,
+                     bool userGesture, const CefPopupFeatures&, CefWindowInfo&,
+                     CefRefPtr<CefClient>&, CefBrowserSettings&,
+                     CefRefPtr<CefDictionaryValue>&, bool*) override {
+    // Attribute the popup to the inspected page so the new tab opens where that
+    // page lives and keeps its session.  Everything else DevTools reports
+    // (title, URL, focus) belongs to the inspector, not the page, and is dropped.
+    if (userGesture && !url.empty() && owner_ > 0)
+      emit(owner_, disposition == CEF_WOD_NEW_BACKGROUND_TAB ? @"popup-background" : @"popup",
+           ns(url.ToString()));
+    return true;
+  }
+
+ private:
+  const int owner_;
+  IMPLEMENT_REFCOUNTING(DevToolsClient);
+};
+
 class Client final : public CefClient,
                      public CefLifeSpanHandler,
                      public CefDisplayHandler,
@@ -1064,7 +1103,7 @@ void command(int id, const std::string& action, const std::string& argument) {
   else if (action == "devtools") {
     CefWindowInfo wi;
     CefBrowserSettings settings;
-    browser->GetHost()->ShowDevTools(wi, new Client(0), settings, CefPoint());
+    browser->GetHost()->ShowDevTools(wi, new DevToolsClient(page->id), settings, CefPoint());
   } else if (action == "close") {
     unfocus(page);
     page->closing = true;
