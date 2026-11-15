@@ -1,0 +1,19 @@
+Chromel ships a compiled snapshot of filter lists that other people wrote and
+maintain.  Nothing in `blocklist.txt` is ours.
+
+Source rulesets: https://github.com/uBlockOrigin/uBOL-home
+  uBOL is licensed GPL-3.0.  The rules in `chromium/rulesets/main/` are compiled
+  by that project from the lists below.
+
+Underlying lists:
+  EasyList            https://easylist.to/            CC BY-SA 3.0
+  EasyPrivacy         https://easylist.to/            CC BY-SA 3.0
+  uBlock filters      https://github.com/uBlockOrigin/uAssets   GPL-3.0
+
+What Chromel does: `scripts/ubol-to-blocklist.py` reads the DNR JSON that uBOL
+publishes and rewrites it as one line per host rule.  No rule is added, removed
+or reinterpreted; rules that need a matcher we have not built yet (paths,
+substrings, regular expressions) are dropped and counted in the file header.
+
+Attribution for the CC BY-SA lists travels with this file: if you redistribute
+`blocklist.txt` or a build containing it, keep this notice and the source URLs.
