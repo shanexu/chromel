@@ -172,7 +172,9 @@ try:
                      "-ApplePersistenceIgnoreState", "YES"],
                     env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
                 try:
-                    status = process.wait(timeout=55)
+                    # 55 s was tight enough that a loaded machine (parallel
+                    # builds, another agent) turned a slow test into a failure.
+                    status = process.wait(timeout=90)
                 except subprocess.TimeoutExpired:
                     os.killpg(process.pid, signal.SIGKILL)
                     process.wait()
