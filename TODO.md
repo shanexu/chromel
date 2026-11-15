@@ -1,8 +1,8 @@
 # Chromel 待办
 
-快照：2026-11-15，分支 `topic/renderer-crash`（基于 `master` `0d078ed`）。
+快照：2026-11-15，分支 `topic/blocker`（基于 `master` `a447651`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 44/44，`python3 scripts/test-gui.py` 24/24 全绿。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 53/53（另加 `python3 test/test_blocklist_converter.py` 3 条），`python3 scripts/test-gui.py` 26 个 PASS、rc=0。
 
 ## 已完成（本轮）
 
@@ -153,6 +153,12 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 
 ### C5 ✅ 泵的空闲判定改问 native
 `chromel_core.h` 新增 `int browser_count();`（只读 `browsers` + `settingsBrowsers`，**不**经 `requireReady`，CEF 未初始化时返回 0）；模块导出 `chromel--native-browser-count`；Elisp 新增 `chromel--native-has-browsers-p`，`chromel--pump-needed-p` 用它取代原先永不重置的 `chromel--settings-open`（该变量已删除）。`chromel-settings` 改为「先发 settings 命令、再 `chromel--ensure-timer`」，因为窗口是在那条命令里同步创建的。API 版本随之升到 2。ERT 新增 2 条并更新 2 条（无页面/无浏览器时停泵、设置窗口存在时继续泵、模块未加载时不问 native）。
+
+### C10 ✅ 没有广告/追踪拦截
+
+Chromel 自带一份 uBOL 三套列表的编译快照（`data/blocklist.txt`，97,334 条域名规则），默认开启。`native/blocklist.mm` 在 IO 线程匹配 host 与发起站点，`Client::GetResourceRequestHandler` 返回 `RV_CANCEL`；`allow` 优先，`i=<suffix>` 限定发起站点，按站点例外存 `blocker.json`。测量：`--blocklist-bench` 20,000 次平均 **0.17 µs**/请求（门槛 20 µs）。
+
+已知不精确：只有域名规则（路径/子串/正则共 16,469 条被丢弃并计数）、忽略 `third-party` 标记（约 8 千条比原版激进）、没有元素隐藏。
 
 ### C9 ✅ 没有代理配置
 

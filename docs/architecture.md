@@ -342,6 +342,22 @@ kill-emacs → chromel--shutdown → native-shutdown
 
 `scripts/smartproxy-to-pac.py` 把 SmartProxy 的备份翻译成 `FindProxyForURL`：保留规则顺序、白名单转 `DIRECT`、协议映射成 `PROXY/HTTPS/SOCKS4/SOCKS5`、CIDR 用 `isInNet`，并对"需要密码的服务器""path 规则""CIDR 需要 DNS"分别告警。
 
+### 4.17 内容拦截：请求链上的域名表
+
+拦截不经过页面里的 JavaScript，也不经过扩展：`Client::GetResourceRequestHandler` 在**列表已加载**时返回一个 `BlockRequestHandler`，它的 `OnBeforeResourceLoad`（IO 线程）返回 `RV_CANCEL`，请求根本不会发出。列表没加载时返回 `nullptr`，走 CEF 默认路径，不额外付出代价。
+
+匹配规则（`native/blocklist.mm`）：
+
+- 从 URL 取 host（跳过 scheme、userinfo、端口，转小写，去掉末尾点），按后缀逐级查表：`a.b.c` 依次查 `a.b.c`、`b.c`、`c`；
+- 每条规则带资源类型位掩码（0 表示全部）。转换器用的位序与 CEF 的 `cef_resource_type_t` **不同**，映射集中在 `type_bit()`，`RT_XHR(13)` 这类差异有单独的测试；
+- **两遍扫描**：先 `allow`、后 `block`，命中即刻返回。这一点必须用枚举（`Verdict`）表达——用 `bool` 会把"allow 命中"和"block 命中"混成一个真值，把白名单域名也拦掉（这个 bug 被 ERT 当场抓住）；
+- 规则可以限定发起站点（`i=<suffix>`）：`initiator` 来自 `CefRequest::GetFirstPartyForCookies()`，用后缀比较；
+- 用户的按站点例外（`blocker.json`）也按发起站点后缀判断，因此"这个站点关掉"覆盖它的所有子资源请求。
+
+计数在 `blocklist_blocks()` 里累加，`info()` 多输出一行 `Blocklist: rules=<n> blocked=<m>`；`chromel-blocker-status` 读的就是它。
+
+规则文件由 `scripts/ubol-to-blocklist.py` 生成（`data/README.md` 有抓取与再生成步骤）。第一版只保留域名类规则，路径/子串/正则计入 `dropped(pattern)`，`third-party`/`first-party` 标记忽略。
+
 ---
 
 ## 5. 不变量（改代码前请先读）
@@ -414,13 +430,13 @@ Emacs.app/Contents/
 
 | 层 | 手段 |
 |---|---|
-| 纯 Elisp 逻辑 | `test/chromel-test.el` 等 35 个 ERT（`emacs --batch`，无 GUI；缺原生模块时 5 条自动跳过，故 Linux CI 也能跑） |
+| 纯 Elisp 逻辑 | `test/chromel-test.el` 等 53 个 ERT（`emacs --batch`，无 GUI；缺原生模块时 5 条自动跳过，故 Linux CI 也能跑） |
 | 真实渲染/输入 | `scripts/test-gui.py` 拉起独立 Emacs 进程（统一 `-l test/gui-frame.el` 固定在 1100×750 的 frame），本地 HTTP fixture，`CHROMEL_CEF_TEST_MODE=1`（临时 profile、mock keychain、禁用后台节流） |
 | 事件泵 | `chromel-pump-probe` 记录 `NSApp.run` 重入次数（必须为 0） |
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 23 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃、下载、权限与剪贴板等；加上原生冒烟共 24 项。
+GUI 套件共 24 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃、下载、权限、代理、内容拦截与剪贴板等；`python3 scripts/test-gui.py` 最后一次完整运行为 26 个 PASS（含原生冒烟，以及 `gui-smoke` 的播种与恢复两次运行）。
 
 `CHROMEL_TEST_ONLY=a.el,b.el` 可只跑子集（原生冒烟总会先跑）。但 fixture 的标题在同一个 profile 里第一次是 `…-ready`、之后才是 `…-restored`，所以过滤掉"播种"的那一条会让 `…-restored` 永远等不到标题。`test-gui.py` 检测到筛选后的第一条不是播种测试时，会自动在前面补一条 `gui-smoke.el`。
 

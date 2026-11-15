@@ -281,6 +281,31 @@ Allow https://example.org/ to use location? (y or n)
 
 答案只活在这次 Emacs 会话里：Chromel 不写自己的权限数据库，重启后同一来源会重新询问（除非 Chromium 自己缓存了该决定）。摄像头/麦克风真正要拿到设备流还需要 `--enable-media-stream` 之类的开关，权限放行只是不再被静默拒绝。
 
+## 内容拦截（广告/追踪）
+
+Chromel 带一份 uBOL（uBlock Origin Lite）三套列表的编译快照，**默认开启**，不需要装扩展：
+
+| 项目 | 值 |
+| --- | --- |
+| 快照 | `data/blocklist.txt`（uBOL 提交 `a58a26f1`，97,334 条域名规则，2.6 MB） |
+| 规则来源 | `ublock-filters`、`easylist`、`easyprivacy` |
+| 生效范围 | 域名与发起站点；`allow` 规则优先于 `block` |
+| 拦截位置 | 浏览器进程的请求链上，请求根本不会发出 |
+
+```elisp
+(setq chromel-blocklist-file (expand-file-name "~/chromel/my-blocklist.txt")) ; 换一份名单
+```
+
+某个站点被拦坏了，就地关掉，选择会记住（`~/chromel/blocker.json`）：
+
+- `M-x chromel-blocker-toggle-site` —— 关掉/打开**当前站点**（精确主机）
+- `C-u M-x chromel-blocker-toggle-site` —— 升到父域（`news.example.com` → `example.com`）；`co.uk` 这类公共后缀会被拒绝
+- `M-x chromel-blocker-status` —— 显示加载了多少条规则、拦了多少次、当前站点是开还是关
+
+要更新规则就重跑生成脚本（`data/README.md` 里有完整的抓取命令），替换文件后**重启 Emacs**——名单在 CEF 启动时读入。
+
+已知不精确：第一版只做域名规则，路径/子串/正则类规则被丢弃（文件头 `dropped(pattern)` 记录条数）；`third-party`/`first-party` 标记未生效，因此约 8 千条规则比原版略激进；元素隐藏（cosmetic filtering）尚未实现。
+
 ## 代理（PAC）
 
 Chromium 对每个请求问一次 PAC 脚本「走不走代理」，所以"哪些域名走代理"由文件决定。把 PAC 路径告诉 Chromel：
