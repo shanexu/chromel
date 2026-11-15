@@ -2,6 +2,7 @@
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 #include "chromel_core.h"
+#include "chromel_scripts.h"
 #include "host_wakeup.h"
 #include "include/cef_app.h"
 #include "include/cef_application_mac.h"
@@ -802,6 +803,8 @@ int browser_count() {
 }
 
 bool is_settings_url(const std::string& url) { return isSettingsURL(url); }
+
+std::string hints_script() { return kChromelHintsSource; }
 
 int create(long handle, const std::string& url) {
   requireReady();

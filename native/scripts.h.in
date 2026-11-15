@@ -2,3 +2,7 @@
 // Generated from scroll.js so tracking starts in every renderer context.
 #pragma once
 constexpr char kChromelScrollBootstrap[] = R"CHROMEL_SCRIPT(@CHROMEL_SCROLL_SOURCE@(0,0);)CHROMEL_SCRIPT";
+// The hint overlay ships with the module, so the Lisp side never has to find
+// a source file at runtime (and cannot run a script the module was not built
+// with).
+constexpr char kChromelHintsSource[] = R"CHROMEL_HINTS(@CHROMEL_HINTS_SOURCE@)CHROMEL_HINTS";

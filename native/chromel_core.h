@@ -13,6 +13,9 @@ int browser_count();
 void initialize(const std::string& bundle, const std::string& profile);
 long bind_window(const std::string& title);
 bool is_settings_url(const std::string& url);
+
+// JavaScript that paints the hint overlay.  Embedded at build time.
+std::string hints_script();
 int create(long window, const std::string& url);
 void layout(int id, long window, double x, double y, double width, double height);
 void hide(int id);
