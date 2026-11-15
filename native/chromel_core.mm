@@ -309,6 +309,23 @@ class Client final : public CefClient,
   void OnAfterCreated(CefRefPtr<CefBrowser> browser) override {
     CEF_REQUIRE_UI_THREAD();
     browsers[browser->GetIdentifier()] = browser;
+    // A popup is a real page whose browser CEF creates after we return from
+    // OnBeforePopup; this is the only moment its view can be adopted.  Look the
+    // page up by the id this client was built with: CEF's own browser id is a
+    // different sequence and drifts as soon as a DevTools browser exists.
+    auto found = pages.find(id_);
+    if (found != pages.end() && found->second->awaitingBrowser) {
+      auto page = found->second;
+      page->awaitingBrowser = false;
+      page->browser = browser;
+      NSView* view = (__bridge NSView*)browser->GetHost()->GetWindowHandle();
+      if (view) {
+        page->lifetimeWindow = view.window;
+        [view removeFromSuperview];
+        [page->container addSubview:view];
+        view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+      }
+    }
   }
   bool DoClose(CefRefPtr<CefBrowser> browser) override {
     auto found = pages.find(id_);
@@ -339,13 +356,35 @@ class Client final : public CefClient,
   }
   bool OnBeforePopup(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, int,
                      const CefString& url, const CefString&, WindowOpenDisposition disposition,
-                     bool userGesture, const CefPopupFeatures&, CefWindowInfo&,
-                     CefRefPtr<CefClient>&, CefBrowserSettings&,
+                     bool userGesture, const CefPopupFeatures&, CefWindowInfo& windowInfo,
+                     CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
                      CefRefPtr<CefDictionaryValue>&, bool*) override {
-    // Deliberate MVP behavior: user-requested links become new Emacs buffers.
-    // This does not preserve window.opener / script-created popup sessions.
-    if (userGesture && !url.empty())
-      emit(id_, disposition == CEF_WOD_NEW_BACKGROUND_TAB ? @"popup-background" : @"popup", ns(url.ToString()));
+    // A popup is a real browser with a real opener.  Cancelling it (the old
+    // behaviour) handed the page a blank tab and lost window.opener, so OAuth
+    // and postMessage flows could not work.  Let CEF create it against a hidden
+    // window and adopt the view into its own page container instead.
+    const auto target = url.ToString();
+    if (!target.empty() && pages.count(id_)) {
+      auto opener = pages[id_];
+      const long handle = opener->container.window ? (long)opener->container.window.windowNumber : 0;
+      CefWindowInfo popupInfo;
+      CefRefPtr<CefClient> popupClient;
+      CefBrowserSettings popupSettings;
+      int popupId = 0;
+      if (handle > 0 && chromel::preparePopupPage(handle, popupInfo, popupClient, popupSettings, popupId)) {
+        windowInfo = popupInfo;
+        client = popupClient;
+        settings = popupSettings;
+        NSDictionary* payload = @{@"id": @(popupId), @"url": ns(target),
+                                  @"background": @(disposition == CEF_WOD_NEW_BACKGROUND_TAB)};
+        NSData* data = [NSJSONSerialization dataWithJSONObject:payload options:0 error:nil];
+        emit(id_, @"popup-page",
+             data ? ns(std::string(static_cast<const char*>(data.bytes), data.length)) : @"");
+        return false;
+      }
+    }
+    if (userGesture && !target.empty())
+      emit(id_, disposition == CEF_WOD_NEW_BACKGROUND_TAB ? @"popup-background" : @"popup", ns(target));
     return true;
   }
   bool OnBeforeBrowse(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,

@@ -267,7 +267,7 @@ chromel/
 
 - Cookie 和站点存储使用磁盘 profile；网站仍可按自身规则让登录失效。
 - 历史由 Elisp 从成功加载事件记录，使用 JSON 和原子替换保存，不依赖 `chrome://history`。
-- 点击打开新窗口的链接会转成新 Emacs buffer。**第一版不保留 `window.opener` 关系**：无论是链接的 `target=_blank` 还是脚本的 `window.open`，都由 Emacs 侧新建 buffer，弹窗无法回写 opener，也不共享 `postMessage` 通道；依赖脚本弹窗通信的登录、支付流程可能不兼容。
+- 点击打开新窗口的链接或脚本 `window.open` 会得到一个**真实弹窗**：CEF 创建浏览器并保留 `window.opener` / `postMessage` 通道，只是它的宿主视图被嵌进一个新的 Emacs buffer（`chromel--adopt-popup`）。`target=_blank` 从 Chrome 88 起默认 `noopener`，需要 opener 的站点会自己加 `rel="opener"`（测试 fixture 就是这么做的）。
 - 页面关闭会强制完成，暂不提供 `beforeunload` 的“未保存内容”确认。
 - CEF helper 保持 Chromium 沙箱开启，没有添加 `--no-sandbox` 或绕过证书校验的参数。
 - `chromel-allow-raw-javascript`（默认 `t`）控制 `javascript` 动作：它把脚本丢给主帧后**不等待结果**，适合"点一下"式的临时操作，但返回值会被丢弃。需要结果时用 `chromel--eval` 那条带 token 的往返通道。设为 `nil` 后相关命令会直接报 `user-error`，适合把浏览视为只读的场景。

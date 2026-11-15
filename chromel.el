@@ -337,10 +337,12 @@ native side has finished tearing them down; pumping must continue until then.")
                (when (eq t (plist-get reply :final)) (setq chromel--find-reply reply)))))
           ("chrome-ui" (chromel-settings value))
           ("popup-background" (chromel value t))
+          ("popup-page"
+           ;; A real popup: CEF already owns its browser and its opener, so the
+           ;; buffer is bound to an existing id instead of creating one.
+           (chromel--adopt-popup value))
           ("popup"
-           ;; A page-initiated tab replaces this window's buffer, exactly like
-           ;; an Emacs-side new tab; pop-to-buffer would split the frame the
-           ;; browser lives in and leave the page half height.
+           ;; Fallback for a popup the backend declined to host.
            (when-let* ((target (chromel value t)))
              (chromel--select-buffer target)))
           ("eval"
@@ -584,6 +586,33 @@ One native view can occupy only one Emacs window at a time."
       (setq chromel--url url chromel--title title chromel--pending t chromel--status "Not loaded")
       (rename-buffer (format "*chromel: %s*" (truncate-string-to-width title 60)) t))
     (setq chromel--tabs (append (seq-take tabs index) (list buffer) (nthcdr index tabs)))
+    buffer))
+
+(defun chromel--adopt-popup (value)
+  "Bind a buffer to the page a popup already created natively.
+VALUE is the JSON payload {\"id\", \"url\", \"background\"}.  The browser exists
+before the buffer does, so this path must never call `chromel--native-create';
+it only registers the new page so layout, input and history work as usual."
+  (let* ((info (json-parse-string value :object-type 'plist))
+         (id (plist-get info :id))
+         (url (or (plist-get info :url) ""))
+         (title (if (string-empty-p url) "Popup" url))
+         (background (eq t (plist-get info :background)))
+         (buffer (generate-new-buffer "*chromel*")))
+    (with-current-buffer buffer
+      (chromel-mode)
+      (setq chromel--id id
+            chromel--url url
+            chromel--title title
+            chromel--pending nil
+            chromel--status "Loading"
+            chromel--sent-selected nil
+            chromel--sent-geometry nil)
+      (rename-buffer (format "*chromel: %s*" (truncate-string-to-width title 60)) t))
+    (setq chromel--tabs (append (chromel--buffers) (list buffer)))
+    (puthash id buffer chromel--pages)
+    (chromel--ensure-timer)
+    (unless background (chromel--select-buffer buffer))
     buffer))
 
 (defun chromel--ensure-browser ()

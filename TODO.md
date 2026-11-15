@@ -139,8 +139,12 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 新增 `defcustom chromel-search-url`（默认 `https://duckduckgo.com/?q=%s`，要求含 `%s`），`chromel--normalize-url` 用 `format` 套用，查询串仍走 `url-hexify-string`。ERT 增加 3 条：默认模板、`%` 转义（`100%25`）、自定义模板生效；29/29 通过。
 > 顺带发现：仓库里的 `chromel.elc` 是未跟踪的构建产物，`load` 会优先加载它，改完 `chromel.el` 直接跑 ERT 会测到旧逻辑（本轮先踩了一次）。建议后续在测试脚本里强制 `load` 源文件或先删 `.elc`。
 
-### C3 ✅ 已知限制已写入 README
-行为未改（仍由 Emacs 开新标签），但 README「数据和能力边界」明确写出：页面发起的新窗口转成新的 Emacs buffer，`window.opener` 关系不保留，依赖脚本弹窗通信的登录流程可能不兼容。要真正支持需要区分「用户手势链接」与「脚本 window.open」，属于行为改造，不在此轮范围。
+### C3 ✅ 弹窗是真弹窗，保留 window.opener
+原实现把 `target=_blank` / `window.open` 变成新标签：URL 对了，但页面拿到的是没有任何关系的顶层页，`window.opener` 为 null，`postMessage` 回不去，OAuth / 支付类流程会卡住。
+
+现在 `OnBeforePopup` 返回 `false`：`preparePopupPage()` 先把 page 登记进 `pages`（`awaitingBrowser = true`，容器 1×1 隐藏挂在 opener 的窗口里），`CefWindowInfo`（hidden + ALLOY）、`CefClient`、`CefBrowserSettings` 交给 CEF，由 CEF 自己创建弹窗；`Client::OnAfterCreated` 负责把 CEF 视图收进 container（这一步**必须**按 client 自己的 `id_` 查 page —— CEF 的 browser id 与 page id 是两套序列，有 DevTools 后就会错开）。随后发 `popup-page` 事件 `{id,url,background}`，Elisp 的 `chromel--adopt-popup` 用**已有** id 建 buffer（绝不调 `chromel--native-create`）。
+
+测试：`test/features.html` 加一个 `target=_blank rel=opener` 的链接与 `test/popup-child.html`，`gui-features` 断言「新 buffer 存在 + URL 正确 + 子页面能读到 `window.opener.document.title`」。踩坑：Chromium 88 起 `target=_blank` 默认 `noopener`，必须显式 `rel=opener`；`popupOpened` 那种 postMessage 断言有竞态，改成子页面直接读 opener 文档。
 
 ### C4 ✅ hints 测试按 URL 选标签，不再硬编码按键
 `gui-hints` 原先发 `(unread-command-events '(?a ?a ?s))` 并强制 `chromel-hint-alphabet "as"`，前提是"只有两个可见链接"。可见数量一变（窗口高度、显示器、缩放），标签就变，测试随即超时。

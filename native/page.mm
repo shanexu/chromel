@@ -72,6 +72,30 @@ namespace chromel {
 // Creating, placing and hiding a page is all "the page and its container", so
 // it lives next to the rest of Page's behaviour.  Everything the browser
 // callbacks do stays in chromel_core.mm.
+bool preparePopupPage(long handle, CefWindowInfo& windowInfo,
+                     CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
+                     int& popupId) {
+  requireBackendReady();
+  NSWindow* win = windowFor(handle);
+  auto page = std::make_shared<Page>();
+  page->id = nextId++;
+  page->host = win.contentView;
+  page->container = [[NSView alloc] initWithFrame:NSMakeRect(0, 0, 1, 1)];
+  page->container.wantsLayer = YES;
+  page->container.hidden = YES;
+  page->container.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  [page->host addSubview:page->container];
+  page->lifetimeWindow = win;
+  page->awaitingBrowser = true;
+  pages[page->id] = page;
+  windowInfo.hidden = true;
+  windowInfo.bounds = CefRect(0, 0, 1, 1);
+  windowInfo.runtime_style = CEF_RUNTIME_STYLE_ALLOY;
+  client = makePageClient(page->id);
+  popupId = page->id;
+  return true;
+}
+
 int create(long handle, const std::string& url) {
   requireBackendReady();
   NSWindow* win = windowFor(handle);

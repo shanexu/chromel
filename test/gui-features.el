@@ -102,7 +102,7 @@
       (setq chromel-test--phase 'copy)
       (let* ((hints (chromel--eval (format "%s(\"as\",\"inspect\",\"copy\")" (chromel--hint-script))))
              (hint (cl-find "中文 link" hints :key (lambda (h) (plist-get h :title)) :test #'equal)))
-        (chromel-test--assert (= 4 (length hints)) "Copy hints included buttons/hidden links")
+        (chromel-test--assert (= 5 (length hints)) "Copy hints included buttons/hidden links")
         (chromel--eval (chromel--hint-call "inspect" "clear"))
         (let ((unread-command-events (string-to-list (plist-get hint :label))) (chromel-hint-alphabet "as"))
           (chromel-copy-link))
@@ -121,6 +121,40 @@
   (chromel-test--assert (eq (window-buffer (selected-window)) chromel-test--source) "Queue selected a new buffer")
   (chromel-test--until "document.querySelectorAll('[data-emacs-chromel-hints]').length===0" "Queue cancel left labels behind")
   (setq chromel-test--phase 'background))
+(defun chromel-test--popup ()
+  "A real popup keeps its opener and becomes a first-class Chromel page."
+  (chromel-scroll-to-top)
+  (let ((tabs (length (chromel--buffers))))
+    (chromel-test--click 320 435)
+    (let ((deadline (+ (float-time) 6)) child)
+      (while (and (not child) (< (float-time) deadline))
+        (setq child (seq-find (lambda (b)
+                                (string-match-p "popup-child\\.html"
+                                                (buffer-local-value 'chromel--url b)))
+                              (hash-table-values chromel--pages)))
+        (unless child (accept-process-output nil 0.05)))
+      (chromel-test--assert child "Popup did not become a Chromel page")
+      (chromel-test--assert (> (length (chromel--buffers)) tabs) "Popup page never joined the tab list")
+      (chromel-test--assert (string-match-p "popup-child\\.html"
+                                            (buffer-local-value 'chromel--url child))
+                            "Popup buffer carries the wrong URL")
+      ;; The child can only reach back into its opener if this really is a popup
+      ;; with an opener, not a fresh top-level page with the same URL.
+      (with-current-buffer child
+        (let ((deadline (+ (float-time) 5)) reachable)
+          (while (and (not reachable) (< (float-time) deadline))
+            (setq reachable (eq t (chromel-test--js
+                                   "(!!window.opener) && window.opener.document.title===\"features-ready\"")))
+            (unless reachable (accept-process-output nil 0.05)))
+          (chromel-test--assert reachable
+                                (format "Popup lost window.opener: %s"
+                                        (chromel-test--js "String(!!window.opener)")))))
+      (with-current-buffer child
+        (chromel-test--assert (plist-get (json-parse-string (chromel--native-inspect chromel--id)
+                                                            :object-type 'plist)
+                                         :focused)
+                              "Popup page never got a browser"))
+      (kill-buffer child))))
 (defun chromel-test--step ()
   (unless chromel-test--busy
     (let ((chromel-test--busy t))
@@ -150,11 +184,13 @@
                        (chromel-test--assert (equal chromel--find-text "") "Search state leaked to another buffer")))
                    (chromel-test--assert (eq (window-buffer (selected-window)) chromel-test--source) "Late loading stole source selection")
                    (mapc #'kill-buffer others)
+                   (setq chromel-test--phase 'popup)
+                   (chromel-test--popup)
                    (setq chromel-test--phase 'closing)
                    (kill-buffer chromel-test--source))))))
         (error (chromel-test--finish nil (format "%s (phase %s)" (error-message-string err) chromel-test--phase))))))
   (when (and (eq chromel-test--phase 'closing) (string-match-p "Browsers including DevTools: 0" (chromel--native-info)))
-    (chromel-test--finish t "Find including cross-origin/Unicode/repeat/no-match; half/top/bottom in page/panel/frame; copy without clicks; queued background links preserve focus and handlers")))
+    (chromel-test--finish t "Find including cross-origin/Unicode/repeat/no-match; half/top/bottom in page/panel/frame; copy without clicks; queued background links preserve focus and handlers; popup keeps window.opener")))
 (run-at-time 1 nil (lambda ()
                     (setq chromel-test--source (chromel (getenv "CHROMEL_TEST_URL")))
                     (run-at-time 0.2 0.2 #'chromel-test--step)))

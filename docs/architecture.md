@@ -176,7 +176,8 @@ Elisp 每 tick 调一次 `chromel--native-events`，native 把整个队列 `NSJS
 | `scroll-key` | CEF 侧接管的 j/k 等滚动键（用于 Elisp 同步状态） |
 | `find` | 查找结果（当前/总数） |
 | `chrome-ui` | 页面请求打开 `chrome://…` 等受管页面 |
-| `popup` / `popup-background` | 页面发起的 `target=_blank` / 新窗口（CEF 弹窗被抑制） |
+| `popup-page` | 页面弹出了一个真实弹窗（JSON `{id,url,background}`），新页面已由 native 建好 |
+| `popup` / `popup-background` | 弹窗兜底：native 拒绝托管时把 URL 交给 Elisp 开新标签 |
 | `eval` | JS 求值结果（带 token） |
 | `closed` | 浏览器已销毁 |
 
@@ -264,7 +265,9 @@ Chromel 在 `NSApplication` 上 swizzle 了 `sendEvent:`：
 
 ### 4.10 新标签、设置窗口与弹窗
 
-- `target=_blank` / `window.open` 被 `OnBeforePopup` 拦下，**不创建 CEF 弹窗**，而是发 `popup` 事件让 Elisp 开一个新 buffer（新 `CefBrowser`）。副作用：`window.opener` 丢失，脚本创建的弹窗会话不保留。
+- `target=_blank` / `window.open` 是**真正的 CEF 弹窗**：`OnBeforePopup` 返回 `false`，只把 `CefWindowInfo`（hidden 1×1、ALLOY）、`CefClient` 与 `CefBrowserSettings` 填好交给 CEF。页面本身由 `preparePopupPage()` 预先登记（`awaitingBrowser = true`），等 `Client::OnAfterCreated` 把 CEF 的视图收进该 page 的 container，再发 `popup-page` 事件（JSON `{id, url, background}`）让 Elisp 用一个**已存在**的浏览器 id 建 buffer（`chromel--adopt-popup`，绝不走 `chromel--native-create`）。
+- 因为弹窗是 CEF 自己创建的，`window.opener` 与 `postMessage` 都保持；`gui-features` 里有断言：子页面必须能读到 `window.opener.document.title`。注意 Chromium 88 起 `target=_blank` 默认带 `noopener`，测试 fixture 用 `rel="opener"` 显式打开。
+- native 拒绝托管（例如 opener 已经关掉）时退回旧路径：发 `popup` / `popup-background`，由 Elisp 开新标签，此时没有 opener。
 - `chrome://settings`、`chrome://extensions`、`chrome://password-manager`、Chrome Web Store 走**独立顶层窗口**（`CEF_RUNTIME_STYLE_CHROME` + 工具栏），因为它们需要 Chrome 的 WebUI 资源与窗口级 UI。判定由 native 的 `is_settings_url()` 单点负责，Elisp 通过 `chromel--native-is-settings-url` 调用，避免两套规则漂移。
 - 页面发起的导航若指向 `chrome://` 受管页面，要求 `userGesture` 才放行（防止恶意重定向打开特权页面）；指向 Web Store 的则允许（这是项目刻意保留的扩展安装路径）。
 
@@ -394,7 +397,7 @@ GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、
 ## 10. 已知取舍与限制
 
 - **标签是 Emacs 的 buffer/window，不是 Chromium 的 TabStrip**：所以没有 Chromium 的标签栏、标签组、标签搜索；
-- **`window.opener` 不保留**：页面弹窗被转成新 buffer，脚本依赖 opener 的会话会失效；
+- **弹窗是单层的**：每个弹窗都是独立 page（独立 `CefBrowser`），共享同一个 profile，但弹窗里的 `target=_blank` 会再开一个标签，不形成浏览器意义上的 window 层级；
 - **DevTools 只回传弹窗**：DevTools 窗口有自己的 `DevToolsClient(owner)`，在浏览器注册表里占一项（`shutdown()` 与计数都依赖它）；除“用户在 DevTools 里点开链接”会按所属页面开新标签外，它的 title/URL/焦点等事件不回报——那些属于检查器，没有对应的 Emacs buffer；
 - **设置窗口一次一个**：已打开时再请求另一个 `chrome://` 页面不会切换 target（既有行为）；
 - **不做 Chrome 同步/书签/下载管理**：这些功能需要 Google 账号体系，当前版本有意不实现；
