@@ -200,7 +200,7 @@ Elisp 所有操作最终都走同一个入口：
 | `javascript` / `javascript-focused` / `javascript-frame` | 只发不收（`chromel-allow-raw-javascript` 控制） |
 | `devtools` / `close` | DevTools、关闭页面 |
 | `settings` / `close-settings` | `chrome://settings` 等受管页面 |
-| `test-*` | 仅 `CHROMEL_CEF_TEST_MODE=1` 下可用的测试钩子 |
+| `test-*` | 仅 `CHROMEL_CEF_TEST_MODE=1` 下可用的测试钩子；生产进程里它们会直接报 `Unknown browser action`，而不是被静默忽略 |
 
 参数一律以 JSON 字符串传递（`argument`），native 侧用 `NSJSONSerialization` 再解析，并逐个检查类型与范围（坐标 < 10^7、必须是有限数等）。未知动作抛 `Unknown browser action`，由模块边界转成 Lisp error。
 
@@ -382,7 +382,9 @@ Emacs.app/Contents/
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape 等；加上原生冒烟共 20 项。可用 `CHROMEL_TEST_ONLY=a.el,b.el` 只跑子集（原生冒烟总会先跑）。
+GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape 等；加上原生冒烟共 20 项。
+
+`CHROMEL_TEST_ONLY=a.el,b.el` 可只跑子集（原生冒烟总会先跑）。但 fixture 的标题在同一个 profile 里第一次是 `…-ready`、之后才是 `…-restored`，所以过滤掉"播种"的那一条会让 `…-restored` 永远等不到标题。`test-gui.py` 检测到筛选后的第一条不是播种测试时，会自动在前面补一条 `gui-smoke.el`。
 
 ---
 
@@ -420,4 +422,4 @@ GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、
 | selected | 当前接收键盘的页面（Emacs window 选中且无 minibuffer 激活） |
 | ownsFocus | 页面被选中且没有输入控件在编辑，此时 j/k 表示滚动 |
 | settings window | `chrome://settings` 等受管页面的独立顶层窗口 |
-| test mode | `CHROMEL_CEF_TEST_MODE=1`，仅测试进程使用 |
+| test mode | 拆成三个开关：`CHROMEL_CEF_TEST_MODE=1`（存在测试钩子）、`CHROMEL_CEF_TEST_QUIET`（不 Show/Activate/抢焦点，默认跟随 MODE）、`CHROMEL_CEF_TEST_HERMETIC`（mock keychain + 临时 profile，默认跟随 MODE） |

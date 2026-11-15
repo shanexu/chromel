@@ -31,6 +31,10 @@
 
 ### 测试与构建
 
+- 测试开关拆成三个明确的承诺：`CHROMEL_CEF_TEST_MODE`（存在 `test-*` 钩子）、`CHROMEL_CEF_TEST_QUIET`（不显示/不抢焦点）、`CHROMEL_CEF_TEST_HERMETIC`（mock keychain + 临时 profile），后两者默认跟随 MODE，因此现有测试无需改动；`info()` 会回报三个开关的取值。
+- 生产进程调用 `test-*` 动作现在直接报 `Unknown browser action: <动作>`，不会再被静默吞掉。
+- `scripts/test-gui.py` 的 `CHROMEL_TEST_ONLY` 会在筛选掉"播种"测试时自动补跑一条 `gui-smoke.el`，避免 `…-restored` 标题永远等不到（此前会一直挂到 55 秒超时）。
+
 - GUI 测试统一在 `test/gui-frame.el` 固定的 1100×750 frame 里运行，几何断言不再随显示器/字体漂移；hints 测试改为按 URL 挑标签，不再硬编码按键序列。
 - CEF 的 bundle 不再由 Elisp 从 `invocation-directory` 猜：新增 `chromel--native-bundle-path`（`NSBundle.mainBundle.bundlePath`），路径做 `file-truename` 兜底，软链/`open`/GUI 启动都不会再拿错 bundle（模块 API 升到 3）。
 
