@@ -267,7 +267,7 @@ Chromel 在 `NSApplication` 上 swizzle 了 `sendEvent:`：
 
 ### 4.11 hints（f 键）
 
-1. Elisp 把 `native/hints.js` 注入当前页面（`eval`，带本次会话 token）；
+1. Elisp 把 `native/hints.js`（构建期内嵌进模块，首次调用后缓存在 `chromel--hints-source`）注入当前页面（`eval`，带本次会话 token）；
 2. 脚本枚举可点击元素，过滤不可见项（`display:none`、零尺寸、视口外、被遮挡——用 `elementFromPoint` 判断，并穿透 shadow DOM）；
 3. 为每个候选生成多字母标签（字母表可配置，至少 2 个不同字母），返回 `[{label, url, tag, title}, …]`；
 4. Elisp 用 `read-key` 逐字母收窄，每敲一个字母调一次脚本的 `filter`；

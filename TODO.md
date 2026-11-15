@@ -60,8 +60,11 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 现在 `DevToolsClient(int owner)`（`native/chromel_core.mm`）：自己维护 `OnAfterCreated`/`OnBeforeClose` 的注册表项，**只**把“用户在 DevTools 里点开的链接”按所属页面回报为 `popup`/`popup-background`，其余事件（title/url/focus）仍然丢弃——它们属于检查器，不属于页面。
 **验证**：`./scripts/build.sh` 零警告；ERT 35/35；`CHROMEL_TEST_ONLY=smoke,controls,features` GUI 全绿。手工探针（经 `scripts/launch.sh`）：加载后 `Pages:1 / Browsers:1` → 开 DevTools `Pages:1 / Browsers:2` → 关页面 `Pages:0 / Browsers:0`；同一探针在改动前的 master 上得到完全相同的计数，说明注册表行为未变，改的只是事件归属。
 
-### B4 hints.js 每次 follow 从磁盘读
-`chromel.el:838-840` 每次 `insert-file-contents "native/hints.js"`，而 `scroll.js` 是构建期内嵌（`CMakeLists.txt:32-34`）。**做法**：统一由 CMake 生成头文件，Elisp 侧只取字符串。
+### B4 ✅ hints.js 构建期内嵌
+原来 `chromel--hint-script` 每次 follow 都 `insert-file-contents "native/hints.js"`，与 `scroll.js` 的构建期内嵌（`CMakeLists.txt` 生成 `chromel_scripts.h`）不一致。
+现在 CMake 同时读取 `native/hints.js` → `kChromelHintsSource`，`chromel_core` 导出 `hints_script()`，模块提供 `chromel--native-hints-script`；Elisp 侧 `chromel--hints-source` 缓存一次即可，兜底才读文件（Linux/无模块的 ERT 仍能跑）。
+好处：运行时不再依赖源码树里的 `.js`，也不会出现"Elisp 注入了比 dylib 新的脚本"。
+**验证**：构建 0 警告；`module=9610 file=9610 equal=t`；ERT 35/35；`CHROMEL_TEST_ONLY=smoke,hints` PASS。
 
 ### B5 ✅ 没有 Elisp↔模块 ABI 握手
 `chromel_core.h` 新增 `kChromelApiVersion`（C5 之后为 2）与 `api_version()`，模块导出 `chromel--native-api-version`；`chromel-module-api-version` 与 `chromel--check-module-api` 在 `chromel--ensure-module` 末尾断言，缺函数或数字不符都直接 `user-error` 并提示 `./scripts/build.sh`。ERT 增 2 条（一致、`nil` 与 `99` 两种不符），31/31 通过（C5 升到 2 后为 35/35）。

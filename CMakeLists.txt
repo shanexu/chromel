@@ -29,7 +29,8 @@ find_package(CEF REQUIRED)
 add_subdirectory("${CEF_LIBCEF_DLL_WRAPPER_PATH}" libcef_dll_wrapper)
 
 add_library(chromel_core STATIC native/chromel_core.mm)
-target_include_directories(chromel_core PUBLIC "${CEF_ROOT}" native)
+target_include_directories(chromel_core PUBLIC "${CEF_ROOT}" native
+  "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_compile_options(chromel_core PRIVATE -fobjc-arc -Wall -Wextra -Wno-unused-parameter -Wno-missing-field-initializers)
 target_link_libraries(chromel_core PUBLIC libcef_dll_wrapper "-framework Cocoa")
 
@@ -39,8 +40,11 @@ target_link_libraries(chromel-module PRIVATE chromel_core)
 set_target_properties(chromel-module PROPERTIES PREFIX "" SUFFIX ".dylib")
 
 add_executable(chromel-helper native/helper.cc)
-set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS "${CMAKE_CURRENT_SOURCE_DIR}/native/scroll.js")
+set_property(DIRECTORY APPEND PROPERTY CMAKE_CONFIGURE_DEPENDS
+  "${CMAKE_CURRENT_SOURCE_DIR}/native/scroll.js"
+  "${CMAKE_CURRENT_SOURCE_DIR}/native/hints.js")
 file(READ "${CMAKE_CURRENT_SOURCE_DIR}/native/scroll.js" CHROMEL_SCROLL_SOURCE)
+file(READ "${CMAKE_CURRENT_SOURCE_DIR}/native/hints.js" CHROMEL_HINTS_SOURCE)
 configure_file(native/scripts.h.in generated/chromel_scripts.h @ONLY)
 target_include_directories(chromel-helper PRIVATE "${CEF_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(chromel-helper PRIVATE libcef_dll_wrapper "-framework Cocoa")

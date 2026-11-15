@@ -866,11 +866,25 @@ Only Emacs can initiate this request; no Lisp interface is exposed to pages."
                              :object-type 'plist :array-type 'list))
       (setq chromel--eval-token nil chromel--eval-reply nil))))
 
+(defvar chromel--hints-source nil
+  "Cached hint overlay JavaScript.
+
+The module embeds native/hints.js at build time, so a running session can never
+execute a script newer than the dylib it loaded.  Tests without a built module
+fall back to reading the file."
+)
+
+(declare-function chromel--native-hints-script "chromel-module" ())
+
 (defun chromel--hint-script ()
-  (with-temp-buffer
-    (let ((coding-system-for-read 'utf-8-unix))
-      (insert-file-contents (expand-file-name "native/hints.js" chromel--directory)))
-    (buffer-string)))
+  (or chromel--hints-source
+      (setq chromel--hints-source
+            (if (and chromel--module-loaded (fboundp 'chromel--native-hints-script))
+                (chromel--native-hints-script)
+              (with-temp-buffer
+                (let ((coding-system-for-read 'utf-8-unix))
+                  (insert-file-contents (expand-file-name "native/hints.js" chromel--directory)))
+                (buffer-string))))))
 
 (defun chromel--hint-call (session method &optional argument)
   "Call METHOD on the hint overlay belonging to SESSION."
