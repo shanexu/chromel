@@ -102,7 +102,7 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 ### B6-old 旧描述（已完成，留档）
 
-### B7 全局状态（进行中：三刀已落地）
+### B7 全局状态（进行中：四刀已落地）
 21 个全局 defvar、单个 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。
 
 **已做（第一刀）**：`Page` 与两张 id→对象表搬进 `native/page.h` / `native/page.mm`，连同 `pageFor`、`ownsFocus`、`stopScroll`、`scrollPage`、`unfocus` 五个按 page 操作的助手。
@@ -116,7 +116,9 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 对外只暴露语义，不暴露状态：`makeSettingsClient()`（`App::GetDefaultClient` 用）、`settingsWindowOpen()`/`settingsBrowserCount()`（泵、`info()`、`browser_count()`）、`inspectSettings()`（`inspect(0)`）、`resetSettingsState()`（`shutdown()` 两条路径都调）、以及三个测试钩子 `showSettingsWindow()`/`closeSettingsWindow()`/`runSettingsScript()`。core 反向提供两个谓词给 settings：`quietDesktopMode()`、`testSwitchesEnabled()` —— 测试开关仍只有一份定义。
 
-**待做**：`queue/emit` 与键盘路径各自分文件（`emit` 被 40 多处调用，价值低于前几刀）；最后才是把 `extern` 换成 registry 访问器。
+**已做（第四刀）**：事件队列搬进 `native/events.h` / `events.mm` —— `emit`（40 多处调用）、`drainEvents`、`resetEvents`，队列本身（`NSMutableArray`）不再由 core 持有；core 只剩两行 `events() { requireReady(); return drainEvents(); }`。收益不在行数（992 → 982），而在**谁拥有数据**：事件流的唯一入口与唯一出口现在在同一文件里。
+
+**待做**：键盘路径（`routeKeyEvent`/`adaptApplication`/`sendEvent:` swizzle）与 `pages`、`scroll`、`EmacsApp` 深耦合，仍留在 core —— 这是最后一刀，收益最低、风险最高，建议不做；`extern` 换 registry 访问器同理。
 
 ### B8 ❌ 不修（调研结论：没有替代品）
 调研目标：能否用 `(frame-parameter frame 'window-id)` 直接拿 NSWindow number，从而删掉 `chromel--frame-handle` 里"临时改 title → 按 title 找窗口"的借用。

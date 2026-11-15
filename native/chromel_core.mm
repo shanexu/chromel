@@ -4,6 +4,7 @@
 #include "chromel_core.h"
 #include "page.h"
 #include "settings.h"
+#include "events.h"
 #include "chromel_scripts.h"
 #include "host_wakeup.h"
 #include "include/cef_app.h"
@@ -36,7 +37,6 @@
 namespace {
 // Chrome-style settings windows share the global request context, but never
 // enter the embedded Page map or its view/focus/lifecycle handling.
-NSMutableArray<NSDictionary*>* queue;
 bool initialized = false;
 bool stopped = false;
 bool pumping = false;
@@ -117,11 +117,6 @@ void checkThread() {
 // page.mm lives in another translation unit; it can still ask the same
 // question without duplicating the message or the state it reads.
 void requireReady() { requireBackendReady(); }
-void emit(int id, NSString* type, NSString* value = @"") {
-  if (!id) return;
-  // Every callback used here is delivered on the CEF UI (Cocoa main) thread.
-  [queue addObject:@{@"id": @(id), @"type": type, @"value": value ?: @""}];
-}
 // CEF may hand out a null or detached main frame while a page is tearing down.
 // Every caller must tolerate that instead of dereferencing it.
 CefRefPtr<CefFrame> mainFrame(const CefRefPtr<CefBrowser>& browser) {
@@ -541,7 +536,7 @@ void initialize(const std::string& bundle, const std::string& profile) {
       usingBlock:^(NSNotification*) { for (const auto& item : pages) stopScroll(item.second); }];
     observers.push_back(token);
   }
-  queue = [NSMutableArray array];
+  resetEvents();
   windows = [NSMapTable strongToWeakObjectsMapTable];
   CefSettings settings;
   settings.command_line_args_disabled = true;
@@ -916,12 +911,7 @@ bool pump_pending() {
 }
 std::string events() {
   requireReady();
-  // An idle tick has nothing to report; skip the JSON round trip entirely.
-  if (queue.count == 0) return "[]";
-  NSData* data = [NSJSONSerialization dataWithJSONObject:queue options:0 error:nil];
-  [queue removeAllObjects];
-  if (!data) return "[]";
-  return std::string((const char*)data.bytes, data.length);
+  return drainEvents();
 }
 std::string info() {
   requireReady();
