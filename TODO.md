@@ -8,6 +8,7 @@
 
 - **P1 崩溃/安全**：`cef.lock.json` 入库；NSException 不越过模块边界；`mainFrame()` 统一守卫；`pumping` 用 RAII；`shutdown()` 不再跑嵌套 AppKit runloop 且两条路径都清理；observer 注销；IPC 空指针检查；`OnBeforeBrowse` 尊重 `userGesture`（特权 `chrome://` 页面必须由用户手势触发，Web Store 交接保留）；settings URL 规则收敛到 native 单一来源；`info()` 不再硬编码 Sandbox；`"javascript"` 有 `chromel-allow-raw-javascript` 开关。
 - **P2 交互/性能**：`s` 归还页内搜索、Web Store 移到 `E`（README 与 meow 测试同步）；定时器按需启停（2 秒关停宽限期，后来进一步做成按 CEF 请求变频，见 B9）；`selected`/layout 变更去重。
+- **测试稳定性**：`gui-hold` 稳态速度改用最小二乘斜率（逐帧 dy/dt 会被单个迟到帧带偏，实测斜率 899.9–900.3 px/s 而逐帧 691–1164）；单测超时 55 s → 90 s。
 - **测试真因**：cmd+click 开新标签改用同窗切换（原先 `pop-to-buffer` 拆 frame，导致 `gui-hints` 只有半屏、标签退化成单字母）；`gui-features` 点击坐标避开视口右侧 16 px 不可命中带；test mode 关闭 Chromium 后台/遮挡节流；合成 Escape 先激活 App 再投递并重试。
 
 ## 工作流
