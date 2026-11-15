@@ -2,7 +2,7 @@
 
 快照：2026-11-15，分支 `topic/renderer-crash`（基于 `master` `0d078ed`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 43/43，`python3 scripts/test-gui.py` 23/23 全绿。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 44/44，`python3 scripts/test-gui.py` 24/24 全绿。
 
 ## 已完成（本轮）
 
@@ -196,7 +196,7 @@ CEF 的代理只认命令行：`--proxy-server` 或 `--proxy-pac-url`，都在�
 ```bash
 ./scripts/build.sh                       # 0 warning
 emacs --batch -L . -L test -l test/chromel-test.el -f ert-run-tests-batch-and-exit
-python3 scripts/test-gui.py              # 23 项，约 5 分钟，会抢焦点
+python3 scripts/test-gui.py              # 24 项，约 5 分钟，会抢焦点
 CHROMEL_TEST_ONLY=smoke,hints python3 scripts/test-gui.py   # 子集
 ```
 

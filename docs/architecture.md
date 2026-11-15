@@ -241,6 +241,7 @@ Chromel 在 `NSApplication` 上 swizzle 了 `sendEvent:`：
 `routeKeyEvent` 负责：
 
 - **单键**：`j/k` 转成像素滚动；`Escape` 先 `unfocus` 再合成一个 `Control-G`（所以在页面里按 Esc 等于 Emacs 的 `keyboard-quit`）；
+- **Command 组合**：页面持焦时 `⌘V/⌘C/⌘X/⌘A/⌘Z`（加 `⇧` 为 `⌘⇧Z`）直接映射到 `CefFrame::Paste/Copy/Cut/SelectAll/Undo/Redo`。Chromium 自己的加速键只对"由它启动的前台应用"生效，经 Emacs 转发进来的按键不会触发那套逻辑，所以这几个编辑命令必须由 Chromel 补上；页面不持焦时不拦截，`⌘V` 仍然是 Emacs 的粘贴；
 - **前缀**：`Ctrl-x`、`Ctrl-c`、`Ctrl-h`、`Opt-x` 被"翻译"成 Emacs 能识别的组合，保证 CEF 持焦时仍能按 `C-x C-f`、`C-c` 等；
 - **长按**：`KeyDown` 的 repeat 被吞掉，滚动由自己的动画驱动（避免系统重复率影响速度）；
 - **鼠标/滚轮**：先停止正在进行的键盘滚动，再把事件交回 CEF。
@@ -419,7 +420,7 @@ Emacs.app/Contents/
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 22 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃、下载与权限等；加上原生冒烟共 23 项。
+GUI 套件共 23 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃、下载、权限与剪贴板等；加上原生冒烟共 24 项。
 
 `CHROMEL_TEST_ONLY=a.el,b.el` 可只跑子集（原生冒烟总会先跑）。但 fixture 的标题在同一个 profile 里第一次是 `…-ready`、之后才是 `…-restored`，所以过滤掉"播种"的那一条会让 `…-restored` 永远等不到标题。`test-gui.py` 检测到筛选后的第一条不是播种测试时，会自动在前面补一条 `gui-smoke.el`。
 
