@@ -30,6 +30,7 @@
 - DevTools 窗口改用专用 `DevToolsClient(owner)`：在 DevTools 里点开的链接会按所属页面打开新标签，不再是点了没反应；其余检查器事件仍不回传（没有对应 buffer）。
 
 ### 内部结构
+- 事件队列（`emit` / `drainEvents` / `resetEvents`）移入 `native/events.mm`：队列的所有权不再散落在宿主层，`chromel_core.mm` 只保留一个两行的 `events()` 适配器。
 - 管理窗口（settings / 密码管理器 / 扩展 / Web Store）整体移入 `native/settings.mm`：它自己的八个全局、四个 CEF 委托、URL 白名单与开关都在一处，宿主只通过 `openSettings`/`closeSettings`/`inspectSettings` 等语义接口访问；`chromel_core.mm` 1186 → 992 行。
 - `create` / `layout` / `hide` 与窗口表移入 `native/page.mm`：页面状态、两张 id→对象表和所有"对某个 page 做的事"现在同处一个编译单元；`chromel_core.mm` 只留 CEF 回调与编排（1311 → 1186 行）。`Client` 通过 `makePageClient(int)` 工厂暴露，就绪检查通过 `requireBackendReady()` 复用同一份错误文案。
 - 事件泵改成按需变频：CEF 用 `OnScheduleMessagePumpWork` 告诉我们有没有活（20 ms），连续 200 ms 没活就降到 250 ms 只排事件队列。一个 idle 标签页的 CPU 从 11.4% 降到 1.3%。JS 滚动与设置窗口仍强制 20 ms。
