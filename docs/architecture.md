@@ -6,7 +6,7 @@
 
 - Elisp 入口：`chromel.el`
 - Emacs 模块：`native/module.mm`
-- 宿主/浏览器层：`native/chromel_core.mm`、`native/helper.cc`、`native/hints.js`、`native/scroll.js`
+- 宿主/浏览器层：`native/chromel_core.mm`（编排）、`native/page.h`/`page.mm`（页面结构与两张 id→对象表）、`native/helper.cc`、`native/hints.js`、`native/scroll.js`
 
 ---
 
@@ -79,6 +79,7 @@
 ### 3.3 `native/chromel_core.mm`（宿主层）
 
 - CEF 初始化（`CefInitialize`）、`NSApplication` 改造、事件泵；
+- 页面本身的结构（`Page`）、`pages`/`browsers` 两张表按 page 操作的助手在 `native/page.h` / `native/page.mm`，宿主层只负责编排；
 - 每个 page 的 `CefBrowser`、`NSView` 容器、几何布局；
 - 命令执行 `command()` 与事件收集 `emit()`；
 - 设置窗口（`chrome://settings` 等）与 DevTools；

@@ -83,8 +83,11 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 ### B6-old 旧描述（已完成，留档）
 
-### B7 全局状态
-21 个全局 defvar、单个 1039 行 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。**做法**：先把 settings 相关 6 个全局收进一个 `SettingsState`，作为中间步。
+### B7 全局状态（进行中：第一刀已落地）
+21 个全局 defvar、单个 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。
+
+**已做（第一刀）**：`Page` 与两张 id→对象表搬进 `native/page.h` / `native/page.mm`，连同 `pageFor`、`ownsFocus`、`stopScroll`、`scrollPage`、`unfocus` 五个按 page 操作的助手；`chromel_core.mm` 从 1311 行降到 1240 行。容器仍是自由全局（`extern`），因为 `create()` 依赖 `Client`、`layout()` 依赖 `windowFor`，这两处还留在 core —— 先切出编译单元，再谈封装。
+**待做**：`create/layout/hide` 迁进 `page.mm`（需要先把 `Client` 或窗口查找下沉）；`settings*` 6 个全局收进 `SettingsState`；`queue/emit` 与键盘路径各自分文件；最后才是把 `extern` 换成 registry 访问器。
 
 ### B8 ❌ 不修（调研结论：没有替代品）
 调研目标：能否用 `(frame-parameter frame 'window-id)` 直接拿 NSWindow number，从而删掉 `chromel--frame-handle` 里"临时改 title → 按 title 找窗口"的借用。
