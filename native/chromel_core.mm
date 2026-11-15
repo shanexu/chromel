@@ -2,6 +2,7 @@
 #import <Cocoa/Cocoa.h>
 #import <objc/runtime.h>
 #include "chromel_core.h"
+#include "blocklist.h"
 #include "page.h"
 #include "settings.h"
 #include "downloads.h"
@@ -314,6 +315,24 @@ class PermissionHandler final : public CefPermissionHandler {
   IMPLEMENT_REFCOUNTING(PermissionHandler);
 };
 
+class BlockRequestHandler final : public CefResourceRequestHandler {
+ public:
+  ReturnValue OnBeforeResourceLoad(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>,
+                                   CefRefPtr<CefRequest> request,
+                                   CefRefPtr<CefCallback>) override {
+    if (!request) return RV_CONTINUE;
+    // IO thread: the list is swapped atomically, so no lock is taken here.
+    const std::string url = request->GetURL().ToString();
+    const std::string initiator = request->GetFirstPartyForCookies().ToString();
+    if (chromel::blocklist_blocks(url, static_cast<int>(request->GetResourceType()), initiator)) {
+      return RV_CANCEL;
+    }
+    return RV_CONTINUE;
+  }
+
+  IMPLEMENT_REFCOUNTING(BlockRequestHandler);
+};
+
 class Client final : public CefClient,
                      public CefLifeSpanHandler,
                      public CefDisplayHandler,
@@ -335,6 +354,13 @@ class Client final : public CefClient,
   CefRefPtr<CefFindHandler> GetFindHandler() override { return this; }
   CefRefPtr<CefDownloadHandler> GetDownloadHandler() override {
     return new DownloadHandler(id_);
+  }
+  // Returning null keeps CEF's default path when no list is loaded, so a page
+  // without a blocklist pays nothing for this hook.
+  CefRefPtr<CefResourceRequestHandler> GetResourceRequestHandler(
+      CefRefPtr<CefBrowser>, CefRefPtr<CefFrame>, CefRefPtr<CefRequest>, bool, bool,
+      const CefString&, bool&) override {
+    return chromel::blocklist_loaded() ? new BlockRequestHandler() : nullptr;
   }
   CefRefPtr<CefPermissionHandler> GetPermissionHandler() override {
     return new PermissionHandler(id_);
@@ -1124,7 +1150,8 @@ std::string info() {
     (testSwitches.hermetic ? "mock (disposable tests only)" : "system") + "\nProfile: " + profilePath +
     "\nTest switches: mode=" + (testSwitches.enabled ? "1" : "0") +
     " quiet=" + (testSwitches.quietDesktop ? "1" : "0") +
-    " hermetic=" + (testSwitches.hermetic ? "1" : "0");
+    " hermetic=" + (testSwitches.hermetic ? "1" : "0") + "\nBlocklist: " +
+    chromel::blocklist_summary();
 }
 std::string inspect(int id) {
   requireReady();
