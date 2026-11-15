@@ -1,8 +1,33 @@
 // SPDX-License-Identifier: GPL-3.0-or-later
 #import <Cocoa/Cocoa.h>
+#include "blocklist.h"
 #include "chromel_core.h"
+#include <chrono>
 #include <cstdio>
 #include <stdexcept>
+#include <string>
+
+// Measures the matcher alone: no CEF, no browser, no network.  Kept next to the
+// smoke test because both need the sandboxed bundle to run at all.
+static int bench(const std::string& path, int samples) {
+  if (samples <= 0) {
+    fprintf(stderr, "need a positive sample count\n");
+    return 2;
+  }
+  chromel::load_blocklist(path);
+  const auto start = std::chrono::steady_clock::now();
+  int blocked = 0;
+  for (int i = 0; i < samples; ++i) {
+    const std::string url = "http://ads.example.com/" + std::to_string(i) + "/x.js";
+    if (chromel::blocklist_blocks(url, 3, "https://news.example.org/")) ++blocked;
+  }
+  const auto elapsed = std::chrono::duration<double, std::micro>(
+                           std::chrono::steady_clock::now() - start)
+                           .count();
+  printf("mean=%.2f us samples=%d blocked=%d %s\n", elapsed / samples, samples, blocked,
+         chromel::blocklist_summary().c_str());
+  return 0;
+}
 
 static void step() {
  @autoreleasepool {
@@ -20,8 +45,14 @@ static void step() {
 
 int main(int argc, char** argv) {
   setvbuf(stdout, nullptr, _IONBF, 0);
+  if (argc == 4 && std::string(argv[1]) == "--blocklist-bench") {
+    return bench(argv[2], atoi(argv[3]));
+  }
   if (argc != 3 || std::string(argv[1]) != "--smoke-test") {
-    fprintf(stderr, "This bundle hosts CEF for Emacs.\nUsage: %s --smoke-test TEMP_PROFILE\n", argv[0]);
+    fprintf(stderr,
+            "This bundle hosts CEF for Emacs.\nUsage: %s --smoke-test TEMP_PROFILE"
+            "\n       %s --blocklist-bench FILE SAMPLES\n",
+            argv[0], argv[0]);
     return 2;
   }
   setenv("CHROMEL_CEF_TEST_MODE", "1", 1);
