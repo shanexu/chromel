@@ -45,7 +45,13 @@ configure_file(native/scripts.h.in generated/chromel_scripts.h @ONLY)
 target_include_directories(chromel-helper PRIVATE "${CEF_ROOT}" "${CMAKE_CURRENT_BINARY_DIR}/generated")
 target_link_libraries(chromel-helper PRIVATE libcef_dll_wrapper "-framework Cocoa")
 
+# A CEF host must live inside a bundle that also carries the framework: the
+# sandbox check compares the framework path against NSBundle.mainBundle.  Build
+# the smoke host straight into the runtime bundle so it can be run by hand.
 add_executable(chromel-smoke native/smoke.mm)
+set_target_properties(chromel-smoke PROPERTIES
+  OUTPUT_NAME ChromelRuntime
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/ChromelRuntime.app/Contents/MacOS")
 target_compile_options(chromel-smoke PRIVATE -fobjc-arc)
 target_link_libraries(chromel-smoke PRIVATE chromel_core)
 

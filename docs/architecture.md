@@ -376,13 +376,13 @@ Emacs.app/Contents/
 
 | 层 | 手段 |
 |---|---|
-| 纯 Elisp 逻辑 | `test/chromel-test.el` 等 28 个 ERT（`emacs --batch`，无 GUI） |
+| 纯 Elisp 逻辑 | `test/chromel-test.el` 等 35 个 ERT（`emacs --batch`，无 GUI；缺原生模块时 5 条自动跳过，故 Linux CI 也能跑） |
 | 真实渲染/输入 | `scripts/test-gui.py` 拉起独立 Emacs 进程，本地 HTTP fixture，`CHROMEL_CEF_TEST_MODE=1`（临时 profile、mock keychain、禁用后台节流） |
 | 事件泵 | `chromel-pump-probe` 记录 `NSApp.run` 重入次数（必须为 0） |
-| 原生冒烟 | `build/chromel-smoke` |
+| 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape 等。可用 `CHROMEL_TEST_ONLY=a.el,b.el` 只跑子集。
+GUI 套件共 19 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape 等；加上原生冒烟共 20 项。可用 `CHROMEL_TEST_ONLY=a.el,b.el` 只跑子集（原生冒烟总会先跑）。
 
 ---
 

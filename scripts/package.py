@@ -29,8 +29,11 @@ def main():
     framework = frameworks / "Chromium Embedded Framework.framework"
     # ditto preserves framework symlinks, modes and resource layout.
     subprocess.run(["ditto", str(cef / "Release" / framework.name), str(framework)], check=True)
-    (contents / "MacOS").mkdir(exist_ok=True)
-    shutil.copy2(build / "chromel-smoke", contents / "MacOS" / "ChromelRuntime")
+    # CMake links the smoke host straight into Contents/MacOS; CEF refuses to
+    # load a framework that is not inside the running app bundle.
+    host = contents / "MacOS" / "ChromelRuntime"
+    if not host.is_file():
+        raise SystemExit(f"missing {host}; run ./scripts/build.sh")
     plist(contents / "Info.plist", "ChromelRuntime", "org.emacs.chromel.runtime",
           **with_bluetooth_usage({}))
     (contents / "PkgInfo").write_bytes(b"APPL????")

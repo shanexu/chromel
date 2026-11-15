@@ -18,7 +18,7 @@ subprocess.run(["cmake", "-S", str(root), "-B", str(build)], check=True)
 # while testing stale native code.
 try:
     subprocess.run(
-        ["cmake", "--build", str(build), "--target", "chromel-module", "chromel-pump-probe"],
+        ["cmake", "--build", str(build), "--target", "chromel-module", "chromel-pump-probe", "chromel-smoke"],
         check=True)
 except subprocess.CalledProcessError:
     raise SystemExit(
@@ -27,6 +27,23 @@ if not module.is_file():
     raise SystemExit(f"FAIL: {module} is missing after a successful build")
 host = subprocess.check_output(["python3", str(root / "scripts/prepare-host.py")], text=True).strip()
 emacs = str(pathlib.Path(host) / "Contents/MacOS/Emacs")
+
+# The native host is cheap to run and covers what Emacs-side scripts cannot see
+# on their own (renderer, reparenting, teardown).  Run it before spawning 19 GUI
+# Emacs processes, with its own throwaway profile.
+smoke = build / "ChromelRuntime.app" / "Contents" / "MacOS" / "ChromelRuntime"
+if not smoke.is_file():
+    raise SystemExit(f"FAIL: {smoke} is missing; run ./scripts/build.sh")
+with tempfile.TemporaryDirectory(prefix="chromel-smoke-") as smoke_dir:
+    # CEF's test mode insists the profile live under NSTemporaryDirectory, which
+    # is what tempfile.gettempdir() returns here.
+    result = subprocess.run([str(smoke), "--smoke-test", str(pathlib.Path(smoke_dir) / "profile")],
+                            capture_output=True, text=True, timeout=180)
+    if result.returncode != 0 or "PASS:" not in result.stdout:
+        raise SystemExit(
+            "FAIL: native smoke host did not pass\n"
+            + (result.stdout or "") + (result.stderr or ""))
+    print(next(line for line in result.stdout.splitlines() if line.startswith("PASS:")), flush=True)
 
 
 class Fixture(http.server.BaseHTTPRequestHandler):
