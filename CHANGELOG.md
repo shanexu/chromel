@@ -69,4 +69,5 @@
 ### 文档
 
 - 新增 `docs/architecture.md`：分层、外部消息泵、视图嵌入与坐标系、事件/命令、JS 往返、键盘双路径、焦点、生命周期、不变量、扩展点。
+- 弹窗改为真实 CEF 弹窗：`window.opener` 与 `postMessage` 恢复，新的 `popup-page` 事件让 Elisp 用已存在的浏览器 id 建 buffer；`OnBeforePopup` 拒绝托管时仍回退到旧的新标签路径。
 - README 补充：CEF 为何必须位于 app bundle、`chromel-allow-raw-javascript` 的取舍、`window.opener` 不可用的已知限制。

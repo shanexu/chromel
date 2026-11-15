@@ -4,9 +4,11 @@
 <a href="/hidden" style="display:none">Hidden link</a>
 <div id="panel"><div><button>Panel control</button><p>Scrollable panel</p></div></div>
 <article><p>NeedleFeature 中文检索</p><p>NeedleFeature 中文检索</p><p>NeedleFeature 中文检索 [literal.*]</p></article>
+<a id="popup" href="popup-child.html" target="_blank" rel="opener" style="position:fixed;left:250px;top:420px;width:140px;height:30px;background:#ccf;z-index:4;display:block">popup</a>
 <iframe name="feature-child" src="__OTHER__/feature-frame"></iframe>
 <script>window.childState=null;window.intercepts=0;window.clicks=0;
 addEventListener('message',e=>{if(e.source===document.querySelector('iframe').contentWindow)childState=e.data});
 document.querySelector('#blocked').onclick=e=>{e.preventDefault();intercepts++};
 document.querySelector('nav').addEventListener('click',e=>{if(e.target.closest('a'))clicks++});
+window.popupOpened=false;addEventListener('message',e=>{if(e.data==='popup-child-ready')popupOpened=true});
 </script>

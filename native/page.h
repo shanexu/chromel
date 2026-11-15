@@ -17,6 +17,9 @@ struct Page {
   __weak NSView* host;
   CefRefPtr<CefBrowser> browser;
   bool closing = false;
+  // True only for a popup: its browser arrives from OnAfterCreated instead of
+  // from CreateBrowserSync, so the view must be adopted there.
+  bool awaitingBrowser = false;
   bool selected = false;
   std::string pendingEval;
   std::string pendingFind;
@@ -53,3 +56,12 @@ void unfocus(const std::shared_ptr<Page>& page);
 // Implemented next to Client, which needs the whole backend; page.mm only
 // needs something to hand to CreateBrowserSync.
 CefRefPtr<CefClient> makePageClient(int id);
+
+// Reserve a page for a popup whose browser only exists after OnBeforePopup
+// returns.  Fills the window/client/settings CEF must use and returns the new
+// page id; Client::OnAfterCreated adopts the real view.
+namespace chromel {
+bool preparePopupPage(long handle, CefWindowInfo& windowInfo,
+                      CefRefPtr<CefClient>& client, CefBrowserSettings& settings,
+                      int& popupId);
+}  // namespace chromel
