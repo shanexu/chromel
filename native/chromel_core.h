@@ -5,7 +5,7 @@
 namespace chromel {
 // Bumped whenever a chromel--native-* signature or semantic changes; the elisp
 // side refuses to run against a module that reports a different number.
-constexpr int kChromelApiVersion = 2;
+constexpr int kChromelApiVersion = 3;
 int api_version();
 // How many CEF browsers (embedded pages or settings windows) are alive.
 // Safe before CefInitialize.
@@ -13,6 +13,10 @@ int browser_count();
 void initialize(const std::string& bundle, const std::string& profile);
 long bind_window(const std::string& title);
 bool is_settings_url(const std::string& url);
+
+// Bundle the running process is in.  Chromium authorizes MainBundlePath, so
+// this is the only bundle CEF can load its framework from.
+std::string bundle_path();
 
 // JavaScript that paints the hint overlay.  Embedded at build time.
 std::string hints_script();

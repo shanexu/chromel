@@ -175,13 +175,19 @@ native side has finished tearing them down; pumping must continue until then.")
     (make-directory chromel-data-directory t)
     (set-file-modes chromel-data-directory #o700)
     (chromel--ensure-module)
-    ;; Chromium's macOS sandbox authorizes MainBundlePath, not CEF's outer
-    ;; bundle override.  The launcher supplies an unchanged Emacs binary in
-    ;; a private bundle with the framework physically inside it.
-    (let ((host (expand-file-name "../.." invocation-directory)))
-      (when (file-directory-p
-             (expand-file-name "Contents/Frameworks/Chromium Embedded Framework.framework" host))
-        (setq chromel-runtime-directory host)))
+    ;; Chromium's macOS sandbox authorizes MainBundlePath, not CEF's bundle
+    ;; override, so the bundle is whatever this process actually runs in: the
+    ;; launcher's private bundle or an Emacs.app with the framework inside it.
+    ;; Ask AppKit rather than deriving it from `invocation-directory', which
+    ;; goes wrong under symlinks, `open' and GUI launches.
+    (setq chromel-runtime-directory
+          (if (fboundp 'chromel--native-bundle-path)
+              (chromel--native-bundle-path)
+            (let ((host (file-truename (expand-file-name "../.." invocation-directory))))
+              (if (file-directory-p
+                   (expand-file-name "Contents/Frameworks/Chromium Embedded Framework.framework" host))
+                  host
+                chromel-runtime-directory))))
     (chromel--native-init (directory-file-name (expand-file-name chromel-runtime-directory))
                       (expand-file-name "profile" chromel-data-directory))
     (setq chromel--initialized t)
@@ -598,7 +604,7 @@ not create a browser tab."
 (declare-function chromel--native-is-settings-url "chromel-module" (url))
 (declare-function chromel--native-api-version "chromel-module" ())
 
-(defconst chromel-module-api-version 2
+(defconst chromel-module-api-version 3
   "API version this file expects from `chromel-native-module'.
 Bump together with `chromel::kChromelApiVersion' whenever a
 `chromel--native-*' signature or meaning changes.")
@@ -875,6 +881,7 @@ fall back to reading the file."
 )
 
 (declare-function chromel--native-hints-script "chromel-module" ())
+(declare-function chromel--native-bundle-path "chromel-module" ())
 
 (defun chromel--hint-script ()
   (or chromel--hints-source
