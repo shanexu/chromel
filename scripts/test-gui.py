@@ -153,7 +153,11 @@ try:
             with log.open("w") as output:
                 process = subprocess.Popen(
                     [emacs, "-Q", "--eval", "(setq native-comp-jit-compilation nil)",
-                     "-L", str(root), "-l", str(root / "test" / script),
+                     "-L", str(root),
+                     # Every GUI script runs in the same frame: geometry
+                     # assertions and hint labels depend on it.
+                     "-l", str(root / "test" / "gui-frame.el"),
+                     "-l", str(root / "test" / script),
                      # Cocoa reads this at startup; keep it away from Emacs's
                      # file-argument parser.  Avoid crash-recovery modal dialogs
                      # in disposable test processes without changing defaults.
