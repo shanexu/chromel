@@ -288,6 +288,7 @@ Chromel 带一份 uBOL（uBlock Origin Lite）三套列表的编译快照，**�
 | 项目 | 值 |
 | --- | --- |
 | 快照 | `data/blocklist.txt`（uBOL 提交 `a58a26f1`，九套 ruleset 编译成 110,616 条域名规则，2.9 MB） |
+| 元素隐藏 | `data/cosmetics.txt`（21,164 个站点，1.9 MB） |
 | 规则来源 | `ublock-filters`、`easylist`、`easyprivacy` |
 | 生效范围 | 域名与发起站点；`allow` 规则优先于 `block` |
 | 拦截位置 | 浏览器进程的请求链上，请求根本不会发出 |
@@ -303,6 +304,20 @@ Chromel 带一份 uBOL（uBlock Origin Lite）三套列表的编译快照，**�
 - `M-x chromel-blocker-status` —— 显示加载了多少条规则、拦了多少次、当前站点是开还是关
 
 要更新规则就重跑生成脚本（`data/README.md` 里有完整的抓取命令），替换文件后**重启 Emacs**——名单在 CEF 启动时读入。
+
+除了拦请求，Chromel 还会把页面里的广告位藏起来（`display: none`），用的也是同一次 uBOL 快照：
+
+| 项目 | 值 |
+| --- | --- |
+| 快照 | `data/cosmetics.txt`（21,164 个站点、1.9 MB；站点无关的部分来自 uBOL 的 `highlyGeneric`） |
+| 生效范围 | 主框架与每个子框架各自按自己的 URL 取规则 |
+| 不支持的 | 程序化选择器（`:has-text` 之类）、正则规则、站点无关的 `lowlyGeneric` 表 |
+
+```elisp
+(setq chromel-cosmetics-file (expand-file-name "~/chromel/my-cosmetics.txt"))
+```
+
+一个选择器写错不会连累其他选择器——生成器把每条规则用 `;` 分开，注入时一条一个 `{display:none!important}`，因为 CSS 遇到不可解析的选择器会丢弃**整条**规则。
 
 已知不精确：第一版只做域名规则，路径/子串/正则类规则被丢弃（文件头 `dropped(pattern)` 记录条数）；`third-party`/`first-party` 标记未生效，因此约 8 千条规则比原版略激进；元素隐藏（cosmetic filtering）尚未实现。
 

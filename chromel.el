@@ -67,6 +67,12 @@ HTTP; an http(s) URL is used as given."
 The file is loaded when CEF starts; a missing file just disables blocking.
 `scripts/ubol-to-blocklist.py' regenerates it from the uBOL rulesets."
   :type 'file)
+(defcustom chromel-cosmetics-file (expand-file-name "data/cosmetics.txt" chromel--directory)
+  "Element hiding rules used by the content blocker.
+uBOL compiles these from the same filter lists as the network rules; the file
+is loaded when CEF starts and a missing file just leaves pages unstyled.
+`scripts/ubol-cosmetics.py' regenerates it."
+  :type 'file)
 (defcustom chromel-download-directory (expand-file-name "~/Downloads")
   "Directory downloads are written to.
 Chromium has no download shelf here, so the backend saves the file with the
@@ -230,6 +236,7 @@ native side has finished tearing them down; pumping must continue until then.")
     (chromel--apply-proxy-pac)
     (chromel--blocker-load-exceptions)
     (chromel--blocker-apply)
+    (chromel--cosmetics-apply)
     ;; Chromium's macOS sandbox authorizes MainBundlePath, not CEF's bundle
     ;; override, so the bundle is whatever this process actually runs in: the
     ;; launcher's private bundle or an Emacs.app with the framework inside it.
@@ -738,6 +745,9 @@ not create a browser tab."
 (declare-function chromel--native-blocklist-load "chromel-module" (path))
 (declare-function chromel--native-blocklist-set-exceptions "chromel-module" (text))
 (declare-function chromel--native-blocklist-info "chromel-module" ())
+(declare-function chromel--native-cosmetics-load "chromel-module" (path))
+(declare-function chromel--native-cosmetics-info "chromel-module" ())
+(declare-function chromel--native-cosmetics-css "chromel-module" (url))
 (declare-function chromel--native-set-download-directory "chromel-module" (directory))
 (declare-function chromel--native-permission-reply "chromel-module" (id decision))
 
@@ -926,6 +936,25 @@ blocking: it must never stop the browser from starting."
             (chromel--native-blocklist-set-exceptions
              (mapconcat #'identity chromel--blocker-exceptions "\n"))
             t)
+        (error
+         (message "Chromel: cannot load %s: %s" file (error-message-string error))
+         nil))))))
+
+(defun chromel--cosmetics-apply ()
+  "Load the element hiding snapshot into the running backend.
+Like the blocklist this is best-effort: a missing or broken file only means
+pages keep their ads visible."
+  (let ((file (expand-file-name chromel-cosmetics-file)))
+    (cond
+     ((not (and (file-regular-p file) (file-readable-p file)))
+      (message "Chromel: no cosmetics at %s" file)
+      nil)
+     ((not (fboundp 'chromel--native-cosmetics-load))
+      (message "Chromel: this module has no cosmetics support; rebuild it")
+      nil)
+     (t
+      (condition-case error
+          (progn (chromel--native-cosmetics-load file) t)
         (error
          (message "Chromel: cannot load %s: %s" file (error-message-string error))
          nil))))))

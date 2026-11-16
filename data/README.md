@@ -61,3 +61,23 @@ Version 1 matches hosts only. Rules that need paths, substrings or regular
 expressions are dropped, and the header counts them under `dropped(pattern)`.
 `dropped(action)` counts rules whose action Chromel cannot perform at all
 (`redirect`, `modifyHeaders`, `upgradeScheme`, …).
+
+## Cosmetics
+
+`cosmetics.txt` holds the element hiding rules from the same snapshot.  uBOL
+keeps them as index-encoded selector lists in
+`chromium/rulesets/scripting/specific/<list>.json` and as plain strings in
+`chromium/rulesets/scripting/generic/<list>.js`; the encoding is documented by
+uBOL's own decoder (`chromium/js/scripting/css-specific.js`): a positive index
+into `selectors` means "hide", `~n` means "exception for this host".
+
+```
+python3 scripts/ubol-cosmetics.py /tmp/ubol/{chn-0,easylist,easyprivacy,jpn-1,kor-1,ublock-badware,ublock-filters}.json \
+  --generic /tmp/ubol/{chn-0,easylist,easyprivacy,jpn-1,kor-1,ublock-badware,ublock-filters}.js \
+  -o data/cosmetics.txt --label "uBlockOrigin/uBOL-home@<sha> ..."
+```
+
+Only `highlyGeneric`, the per-host lists and their `~n` exceptions survive;
+framework cosmetics (procedural selectors like `:has-text`), `regexes`, and the
+`lowlyGeneric` maps are counted and dropped.  Selectors are joined with `;` so
+the backend can emit one rule per selector.

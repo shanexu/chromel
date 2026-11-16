@@ -17,3 +17,6 @@ substrings, regular expressions) are dropped and counted in the file header.
 
 Attribution for the CC BY-SA lists travels with this file: if you redistribute
 `blocklist.txt` or a build containing it, keep this notice and the source URLs.
+
+`cosmetics.txt` is derived from the same uBOL snapshot (its compiled
+selector lists) and carries the same licenses.

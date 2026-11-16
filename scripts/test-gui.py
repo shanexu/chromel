@@ -119,6 +119,27 @@ Notification.requestPermission().then(function (result) {
                     "onload=\"document.title='ad-loaded'\" "
                     "onerror=\"document.title='ad-blocked'\">").encode()
             content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/cosmetic-frame'):
+            body = (b"<!doctype html><title>cosmetic-child</title>"
+                    b"<div id=\"banner\" style=\"height:60px\">child banner</div>")
+            content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/cosmetic'):
+            # Both the banner and the generic block are hidden by the snapshot
+            # the test installs; the child frame proves subframe injection.
+            body = (b"<!doctype html><meta charset=utf-8><title>cosmetic-fixture</title>"
+                    b"<div id=\"banner\" style=\"height:60px\">banner</div>"
+                    b"<div class=\"ad-generic\" style=\"height:40px\">generic</div>"
+                    b"<iframe id=\"child\" src=\"/cosmetic-frame\" "
+                    b"style=\"width:300px;height:80px\"></iframe>"
+                    b"<script>function report(){"
+                    b"var main=document.getElementById('banner').offsetHeight===0;"
+                    b"var generic=document.querySelector('.ad-generic').offsetHeight===0;"
+                    b"var doc=document.getElementById('child').contentDocument;"
+                    b"var inner=doc&&doc.getElementById('banner');"
+                    b"var sub=!!inner&&inner.offsetHeight===0;"
+                    b"document.title='cosmetic:'+main+':'+sub+':'+generic;}"
+                    b"setTimeout(report,800);</script>")
+            content_type = "text/html; charset=utf-8"
         elif self.path.startswith('/ad.png'):
             body = ONE_PIXEL_PNG
             content_type = "image/png"
@@ -194,6 +215,7 @@ try:
             ("chromel-emacs-restored", "gui-proxy.el"),
             ("paste-fixture", "gui-paste.el"),
             ("blocker-fixture", "gui-blocker.el"),
+            ("cosmetic:true:true:true", "gui-cosmetics.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:
@@ -208,7 +230,7 @@ try:
         for expected, script in tests:
             route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
                      'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html',
-                     'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker'}.get(script, '/fixture')
+                     'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker', 'gui-cosmetics.el': '/cosmetic'}.get(script, '/fixture')
             test_url = url.replace('/fixture', route)
             result = pathlib.Path(temp) / "result"
             result.unlink(missing_ok=True)

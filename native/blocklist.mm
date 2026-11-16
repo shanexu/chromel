@@ -231,4 +231,6 @@ bool blocklist_blocks(const std::string& url, int resource_type, const std::stri
   return true;
 }
 
+std::string url_host(const std::string& url) { return host_of(url); }
+
 }  // namespace chromel
