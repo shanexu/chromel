@@ -1174,7 +1174,8 @@ std::string inspect(int id) {
     @"window": @(page->container.window.windowNumber),
     @"hidden": @(page->container.hidden), @"focused": @(ownsFocus(page)),
     @"focusedFrameName": focusedFrame ? ns(focusedFrame->GetName().ToString()) : @"",
-    @"hostClass": NSStringFromClass(host.class) ?: @"detached"};
+    @"hostClass": NSStringFromClass(host.class) ?: @"detached",
+    @"responder": NSStringFromClass(page->container.window.firstResponder.class) ?: @"none"};
   NSData* geometry = [NSJSONSerialization dataWithJSONObject:state options:0 error:nil];
   if (!geometry) return "{}";
   return std::string((const char*)geometry.bytes, geometry.length);

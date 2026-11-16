@@ -54,7 +54,15 @@ void unfocus(const std::shared_ptr<Page>& page) {
   stopScroll(page);
   if (ownsFocus(page)) {
     if (page->browser) page->browser->GetHost()->SetFocus(false);
-    [page->container.window makeFirstResponder:page->host];
+    NSWindow* window = page->container.window;
+    NSView* responder = page->host;
+    // On newer Emacs, contentView is a plain NSView wrapping EmacsView.
+    // Restore the actual editor (also the window delegate), not its wrapper:
+    // the wrapper accepts focus but does not decode Escape for Lisp/Meow.
+    if ([window.delegate isKindOfClass:NSView.class] &&
+        [(NSView*)window.delegate isDescendantOf:page->host])
+      responder = (NSView*)window.delegate;
+    [window makeFirstResponder:responder];
   }
 }
 
