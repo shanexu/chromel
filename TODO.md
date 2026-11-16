@@ -2,7 +2,7 @@
 
 快照：2026-11-15，分支 `topic/blocker`（基于 `master` `a447651`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 54/54（另加 `python3 test/test_blocklist_converter.py` 3 条），`python3 scripts/test-gui.py` 26 个 PASS、rc=0。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 56/56（另加 `python3 test/test_blocklist_converter.py` 3 条与 `python3 test/test_cosmetics_converter.py` 9 条），`python3 scripts/test-gui.py` 27 个 PASS、rc=0。
 
 ## 已完成（本轮）
 
@@ -158,7 +158,9 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 
 Chromel 自带一份 uBOL 九套 ruleset 的编译快照（`data/blocklist.txt`，110,616 条域名规则），默认开启。`native/blocklist.mm` 在 IO 线程匹配 host 与发起站点，`Client::GetResourceRequestHandler` 返回 `RV_CANCEL`；`allow` 优先，`i=<suffix>` 限定发起站点，按站点例外存 `blocker.json`。测量：`--blocklist-bench` 20,000 次平均 **0.17 µs**/请求（门槛 20 µs）。
 
-已知不精确：只有域名规则（路径/子串/正则共 16,469 条被丢弃并计数）、忽略 `third-party` 标记（约 8 千条比原版激进）、没有元素隐藏。
+元素隐藏（同一快照）：`data/cosmetics.txt` 有 21,164 个站点的规则（1.9 MB），`native/cosmetics.mm` 在 `Client::OnLoadEnd` 对**每个框架**注入 `<style>`，按宿主后缀逐级匹配、`~n` 例外在生成期已扣除。选择器用 `;` 分组、一条一个 `{display:none!important}` —— CSS 遇到不可解析的选择器会丢掉整条逗号列表，uBOL 的列表里确实有这样的选择器（第一版整块注入时全站失效，被 `gui-cosmetics` 抓到）。
+
+已知不精确：只有域名规则（路径/子串/正则共 24,717 条被丢弃并计数）、忽略 `third-party` 标记（约 8 千条比原版激进）、元素隐藏不支持程序化选择器（`:has-text` 等）与 `lowlyGeneric`、不做内联/脚本注入式隐藏。
 
 ### C9 ✅ 没有代理配置
 

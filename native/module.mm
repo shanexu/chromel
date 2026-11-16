@@ -2,6 +2,7 @@
 #import <Foundation/Foundation.h>
 #include <emacs-module.h>
 #include "blocklist.h"
+#include "cosmetics.h"
 #include "chromel_core.h"
 #include "downloads.h"
 #include "permissions.h"
@@ -33,7 +34,7 @@ emacs_value signalText(emacs_env* env, const char* text) {
   env->non_local_exit_signal(env, env->intern(env, "error"), list);
   return env->intern(env, "nil");
 }
-enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory, PermissionReply, SetProxyPac, BlocklistLoad, BlocklistSetExceptions, BlocklistInfo, BlocklistBlocks };
+enum Op { Init, Bind, Create, Layout, Hide, Command, Pump, Events, Info, Inspect, Shutdown, IsSettingsUrl, ApiVersion, BrowserCount, HintsScript, BundlePath, PumpPending, SetDownloadDirectory, PermissionReply, SetProxyPac, BlocklistLoad, BlocklistSetExceptions, BlocklistInfo, BlocklistBlocks, CosmeticsLoad, CosmeticsInfo, CosmeticsCss };
 emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexcept {
  @autoreleasepool {
   emacs_value nilValue = env->intern(env, "nil");
@@ -50,6 +51,7 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
         op == SetProxyPac || op == BlocklistLoad || op == BlocklistSetExceptions)
       first = string(0);
     if (op == BlocklistBlocks) { first = string(0); numbers[0] = integer(1); second = string(2); }
+    if (op == CosmeticsLoad || op == CosmeticsCss) first = string(0);
     if (op == Create) { numbers[0] = integer(0); first = string(1); }
     if (op == Layout) for (int i = 0; i < 6; ++i) numbers[i] = integer(i);
     if (op == Hide || op == Command || op == Inspect) numbers[0] = integer(0);
@@ -82,6 +84,9 @@ emacs_value call(emacs_env* env, ptrdiff_t, emacs_value* args, void* data) noexc
       case BlocklistLoad: chromel::load_blocklist(first); break;
       case BlocklistSetExceptions: chromel::set_blocklist_exceptions(first); break;
       case BlocklistInfo: return result(env, chromel::blocklist_summary());
+      case CosmeticsLoad: chromel::load_cosmetics(first); break;
+      case CosmeticsInfo: return result(env, chromel::cosmetics_summary());
+      case CosmeticsCss: return result(env, chromel::cosmetics_css(first));
       case BlocklistBlocks:
         return chromel::blocklist_blocks(first, static_cast<int>(numbers[0]), second)
                    ? env->intern(env, "t")
@@ -126,6 +131,9 @@ extern "C" int emacs_module_init(emacs_runtime* runtime) noexcept {
     {"blocklist-set-exceptions", 1, BlocklistSetExceptions, "Set the newline separated hosts that are never blocked."},
     {"blocklist-info", 0, BlocklistInfo, "Return 'rules=N blocked=M' for the loaded blocklist."},
     {"blocklist-blocks", 3, BlocklistBlocks, "Return non-nil when URL, of CEF resource TYPE, is blocked for INITIATOR."},
+    {"cosmetics-load", 1, CosmeticsLoad, "Read a cosmetics snapshot file."},
+    {"cosmetics-info", 0, CosmeticsInfo, "Report the cosmetics snapshot state."},
+    {"cosmetics-css", 1, CosmeticsCss, "Return the stylesheet that applies to URL."},
     {"bundle-path", 0, BundlePath, "Return the bundle this process runs in."},
     {"pump-pending", 0, PumpPending, "Return 1 when CEF has work scheduled for the message loop."},
     {"inspect", 1, Inspect, "Return actual Cocoa geometry and focus state of browser ID as JSON."},

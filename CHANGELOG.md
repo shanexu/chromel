@@ -33,6 +33,7 @@
 
 - DevTools 窗口改用专用 `DevToolsClient(owner)`：在 DevTools 里点开的链接会按所属页面打开新标签，不再是点了没反应；其余检查器事件仍不回传（没有对应 buffer）。
 
+- 内容拦截现在也藏广告位：`data/cosmetics.txt`（uBOL 快照编译，21,164 个站点）在主框架与子框架注入 `display: none`，可换文件或用 `chromel-cosmetics-file` 指向自己的清单。
 ### 内部结构
 - 事件队列（`emit` / `drainEvents` / `resetEvents`）移入 `native/events.mm`：队列的所有权不再散落在宿主层，`chromel_core.mm` 只保留一个两行的 `events()` 适配器。
 - 管理窗口（settings / 密码管理器 / 扩展 / Web Store）整体移入 `native/settings.mm`：它自己的八个全局、四个 CEF 委托、URL 白名单与开关都在一处，宿主只通过 `openSettings`/`closeSettings`/`inspectSettings` 等语义接口访问；`chromel_core.mm` 1186 → 992 行。

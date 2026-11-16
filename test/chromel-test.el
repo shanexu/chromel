@@ -771,3 +771,33 @@
         (chromel--blocker-exceptions nil))
     (cl-letf (((symbol-function 'message) #'ignore))
       (should-not (chromel--blocker-apply)))))
+
+(ert-deftest chromel-cosmetics-match-the-host-and-its-children ()
+  (skip-unless (chromel-test--module-available-p))
+  (chromel--ensure-module)
+  (let ((file (make-temp-file "chromel-cosmetics" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "# chromel-cosmetics 1\n"
+                    "g\t.ad-generic\n"
+                    "h\texample.com\t#ad,div.promo\n"))
+          (chromel--native-cosmetics-load file)
+          (should (equal (chromel--native-cosmetics-info) "hosts=1 injected=0"))
+          (dolist (url '("https://example.com/" "https://www.example.com/x"
+                         "https://WWW.Example.COM:8443/x"))
+            (let ((css (chromel--native-cosmetics-css url)))
+              (should (string-match-p "#ad" css))
+              (should (string-match-p "div.promo" css))
+              (should (string-match-p ".ad-generic" css))))
+          (should (equal (chromel--native-cosmetics-css "https://example.org/")
+                         ".ad-generic"))
+          (should (equal (chromel--native-cosmetics-css "https://notexample.com/")
+                         ".ad-generic")))
+      (delete-file file))))
+
+(ert-deftest chromel-cosmetics-apply-survives-a-broken-file ()
+  (skip-unless (chromel-test--module-available-p))
+  (let ((chromel-cosmetics-file "/nonexistent/cosmetics.txt"))
+    (cl-letf (((symbol-function 'message) #'ignore))
+      (should-not (chromel--cosmetics-apply)))))

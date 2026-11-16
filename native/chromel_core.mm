@@ -3,6 +3,7 @@
 #import <objc/runtime.h>
 #include "chromel_core.h"
 #include "blocklist.h"
+#include "cosmetics.h"
 #include "page.h"
 #include "settings.h"
 #include "downloads.h"
@@ -559,6 +560,13 @@ class Client final : public CefClient,
   }
   void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int status) override {
     if (frame->IsMain() && status < 400) emit(id_, @"loaded");
+    if (!frame || !chromel::cosmetics_loaded()) return;
+    // Cosmetics are injected per frame: a subframe's URL decides its own rules,
+    // and a site that only styles its ad iframe still gets hidden.
+    const std::string css = chromel::cosmetics_css(frame->GetURL().ToString());
+    if (css.empty()) return;
+    frame->ExecuteJavaScript(chromel::cosmetics_script(css), frame->GetURL(), 0);
+    chromel::cosmetics_count_injection();
   }
   void OnLoadError(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
                    ErrorCode code, const CefString& message, const CefString&) override {
@@ -1151,7 +1159,7 @@ std::string info() {
     "\nTest switches: mode=" + (testSwitches.enabled ? "1" : "0") +
     " quiet=" + (testSwitches.quietDesktop ? "1" : "0") +
     " hermetic=" + (testSwitches.hermetic ? "1" : "0") + "\nBlocklist: " +
-    chromel::blocklist_summary();
+    chromel::blocklist_summary() + "\nCosmetics: " + chromel::cosmetics_summary();
 }
 std::string inspect(int id) {
   requireReady();

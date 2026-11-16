@@ -23,4 +23,8 @@ bool blocklist_blocks(const std::string& url, int resource_type,
 // blocker off on this site" list).  UI thread.
 void set_blocklist_exceptions(const std::string& newline_separated);
 
+// Lower-cased host of `url`, without userinfo or port.  Shared with the
+// cosmetics matcher so both agree on what the page's host is.
+std::string url_host(const std::string& url);
+
 }  // namespace chromel

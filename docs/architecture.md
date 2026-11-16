@@ -358,6 +358,24 @@ kill-emacs → chromel--shutdown → native-shutdown
 
 规则文件由 `scripts/ubol-to-blocklist.py` 生成（`data/README.md` 有抓取与再生成步骤），当前快照是 uBOL 的九套 ruleset（含 badware、urlhaus、pgl 与 AdGuard 的中日韩列表），110,616 条。第一版只保留域名类规则，路径/子串/正则计入 `dropped(pattern)`，`third-party`/`first-party` 标记忽略。
 
+### 4.18 元素隐藏：每条规则一个样式
+
+同一份 uBOL 快照里还有"把广告位藏起来"的规则，它们在 `chromium/rulesets/scripting/`，不在 DNR 规则里：
+
+- `specific/<list>.json` 按站点存：`selectors[]` 是选择器池，`selectorLists[i]` 是**去掉方括号的 JSON 数组**，正数是"隐藏"的索引，负数按 `~n` 解码为"该站点的例外"（`chromium/js/scripting/css-specific.js` 里的解码器是唯一权威，靠 Python 负索引猜会错位）；
+- `generic/<list>.js` 里 `highlyGeneric` 是一条逗号连接的选择器串，`exceptions` 是要从它里面剔掉的选择器。
+
+`scripts/ubol-cosmetics.py` 把两者编译成 `data/cosmetics.txt`：`g<TAB>选择器;选择器` 与 `h<TAB>主机<TAB>选择器;选择器`。生成期已经做完三件事——`~n` 例外扣除、跨列表按主机去重、把逗号列表拆成 `;`。第一版 21,164 个主机、1.9 MB。
+
+注入（`native/cosmetics.mm` + `Client::OnLoadEnd`）：
+
+- **每帧各自注入**：URL 决定用哪一组规则，子框架用它自己的 URL；`gui-cosmetics` 的 fixture 在主框架与 iframe 里各放一个 `#banner`，两者都必须是 0 高度；
+- 宿主按后缀逐级匹配（`a.b.c` → `a.b.c`/`b.c`/`c`），命中即停，站点无关的 `g` 规则永远参与；
+- **一条规则一个 `{display:none!important}`**：CSS 遇到不可解析的选择器会丢弃整条逗号列表，uBOL 的列表里确实有这种选择器，整块注入时页面上一条规则都不生效（被 `gui-cosmetics` 抓到，改成 `;` 分组后通过）；
+- 样式装进 `<style id="chromel-cosmetics">`，重复注入是幂等的；`info()` 多输出 `Cosmetics: hosts=<n> injected=<frames>`。
+
+删掉的是程序化选择器（`:has-text` 等需要 JS 逐元素判断）、`regexes` 三元组、以及站点无关的 `lowlyGeneric` 表——它们要么需要运行时脚本，要么体积与效果不成比例。
+
 ---
 
 ## 5. 不变量（改代码前请先读）
@@ -430,13 +448,13 @@ Emacs.app/Contents/
 
 | 层 | 手段 |
 |---|---|
-| 纯 Elisp 逻辑 | `test/chromel-test.el` 等 54 个 ERT（`emacs --batch`，无 GUI；缺原生模块时 5 条自动跳过，故 Linux CI 也能跑） |
+| 纯 Elisp 逻辑 | `test/chromel-test.el` 等 56 个 ERT（`emacs --batch`，无 GUI；缺原生模块时 5 条自动跳过，故 Linux CI 也能跑） |
 | 真实渲染/输入 | `scripts/test-gui.py` 拉起独立 Emacs 进程（统一 `-l test/gui-frame.el` 固定在 1100×750 的 frame），本地 HTTP fixture，`CHROMEL_CEF_TEST_MODE=1`（临时 profile、mock keychain、禁用后台节流） |
 | 事件泵 | `chromel-pump-probe` 记录 `NSApp.run` 重入次数（必须为 0） |
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 24 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃、下载、权限、代理、内容拦截与剪贴板等；`python3 scripts/test-gui.py` 最后一次完整运行为 26 个 PASS（含原生冒烟，以及 `gui-smoke` 的播种与恢复两次运行）。
+GUI 套件共 25 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、崩溃、下载、权限、代理、内容拦截、元素隐藏与剪贴板等；`python3 scripts/test-gui.py` 最后一次完整运行为 27 个 PASS（含原生冒烟，以及 `gui-smoke` 的播种与恢复两次运行）。
 
 `CHROMEL_TEST_ONLY=a.el,b.el` 可只跑子集（原生冒烟总会先跑）。但 fixture 的标题在同一个 profile 里第一次是 `…-ready`、之后才是 `…-restored`，所以过滤掉"播种"的那一条会让 `…-restored` 永远等不到标题。`test-gui.py` 检测到筛选后的第一条不是播种测试时，会自动在前面补一条 `gui-smoke.el`。
 
