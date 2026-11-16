@@ -130,6 +130,27 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-id` 为 nil，与 AppKit 无关。窗口标题借用保留；`unwind-protect` 已保证标题一定还原，token 里带 pid 与随机串，撞车概率可忽略。
 （顺带修掉了同一条链上的真 bug：见 A7。）
 
+### B10 上游有、我们还没有：CDP 远程调试端口
+
+上游 `4729098` 加了 `chromel-remote-debugging-port`（`CefSettings.remote_debugging_port`），
+让 Playwright / chrome-remote-interface 能挂到已有的页面。
+
+移植成本：约 30–40 分钟。要动三处我们和上游不同的地方——`initialize(bundle, profile)`
+加第三个可选参数、`module.mm` 的 `Init` 参数校验与预取、`chromel.el` 的
+`chromel--native-init` 调用点。风险低（纯新增开关，默认 nil 不改变行为）。
+
+取舍：只有做自动化/远程调试才值得；它和 B11 配对时价值最大。
+
+### B11 上游有、我们还没有：异步执行页面脚本
+
+上游 `1aeb1e1` 加了 `chromel-execute-script`：回调、超时、取消，能 await promise
+（`helper.cc` 里改了渲染侧的注入方式）。我们现在只有 `chromel--eval`——同步忙等最多
+5 秒，期间泵被占用，页面里的长任务会直接拖住 Emacs。
+
+移植成本：约 2–3 小时，432 行，撞两处我们改写过的地方（`browserActions()` 命令表、
+`Client::OnProcessMessageReceived` 的 eval 分支）。建议单独一个 PR，先补 ERT（token
+registry、超时、取消），再动 native。
+
 ## C. 行为与 UX
 
 ### C1 ✅ 延迟标签的命令路径有测试兜底

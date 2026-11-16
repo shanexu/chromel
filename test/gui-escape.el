@@ -40,7 +40,12 @@
           (chromel-focus)
           (message "Testing page Escape")
           (chromel-test--escape)
-          (chromel-test--assert (eq :false (plist-get (json-parse-string (chromel--native-inspect chromel--id) :object-type 'plist) :focused)) "Escape left focus in the page")
+          (let ((state (json-parse-string (chromel--native-inspect chromel--id) :object-type 'plist)))
+            (chromel-test--assert (eq :false (plist-get state :focused)) "Escape left focus in the page")
+            ;; The page's host view is a plain NSView wrapper on Emacs 31;
+            ;; handing it the keyboard leaves Escape undecoded by EmacsView.
+            (chromel-test--assert (equal (plist-get state :responder) "EmacsView")
+                                  (format "Unfocus restored the wrong responder: %S" (plist-get state :responder))))
           (chromel-test--assert (= 0 (chromel--eval "JSON.stringify(escapeCount)")) "Escape leaked to the page")
           ;; Now Emacs owns the keyboard: Meow must not override C-g.
           (message "Testing command Escape")
