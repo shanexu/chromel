@@ -67,6 +67,13 @@ HTTP; an http(s) URL is used as given."
 The file is loaded when CEF starts; a missing file just disables blocking.
 `scripts/ubol-to-blocklist.py' regenerates it from the uBOL rulesets."
   :type 'file)
+(defcustom chromel-remote-debugging-port nil
+  "Local Chrome DevTools Protocol port, or nil to keep it off.
+An integer from 1024 through 65535 is handed to Chromium as
+`--remote-debugging-port', so tools such as Playwright can attach to the pages
+this Emacs already owns.  The port is read when CEF starts: set it, then
+restart Emacs."
+  :type '(choice (const :tag "Disabled" nil) (integer :tag "Port")))
 (defcustom chromel-cosmetics-file (expand-file-name "data/cosmetics.txt" chromel--directory)
   "Element hiding rules used by the content blocker.
 uBOL compiles these from the same filter lists as the network rules; the file
@@ -112,7 +119,7 @@ Held j/k use `chromel-scroll-speed` after the initial step."
   :type 'natnum)
 (defvar-local chromel--scroll-settings nil)
 
-(declare-function chromel--native-init "chromel-module" (bundle profile))
+(declare-function chromel--native-init "chromel-module" (bundle profile &optional debugging-port))
 (declare-function chromel--native-bind "chromel-module" (title))
 (declare-function chromel--native-create "chromel-module" (window url))
 (declare-function chromel--native-layout "chromel-module" (id window x y width height))
@@ -251,7 +258,8 @@ native side has finished tearing them down; pumping must continue until then.")
                   host
                 chromel-runtime-directory))))
     (chromel--native-init (directory-file-name (expand-file-name chromel-runtime-directory))
-                      (expand-file-name "profile" chromel-data-directory))
+                      (expand-file-name "profile" chromel-data-directory)
+                      (chromel--debugging-port))
     (setq chromel--initialized t)
     (chromel--history-load)
     (add-hook 'window-size-change-functions #'chromel--sync)
@@ -845,6 +853,15 @@ connects directly rather than failing every page load."
             'chromel
             (format "PAC file %s is unreadable; connecting directly" value))
            "")))
+
+(defun chromel--debugging-port ()
+  "Return the validated CDP port, or nil when remote debugging is off."
+  (cond
+   ((null chromel-remote-debugging-port) nil)
+   ((and (integerp chromel-remote-debugging-port)
+         (<= 1024 chromel-remote-debugging-port 65535))
+    chromel-remote-debugging-port)
+   (t (user-error "chromel-remote-debugging-port must be nil or an integer from 1024 to 65535"))))
 
 (defun chromel--apply-proxy-pac ()
   "Hand the backend its PAC URL before CEF starts.

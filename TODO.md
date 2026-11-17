@@ -130,16 +130,14 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-id` 为 nil，与 AppKit 无关。窗口标题借用保留；`unwind-protect` 已保证标题一定还原，token 里带 pid 与随机串，撞车概率可忽略。
 （顺带修掉了同一条链上的真 bug：见 A7。）
 
-### B10 上游有、我们还没有：CDP 远程调试端口
+### B10 ✅ CDP 远程调试端口
 
-上游 `4729098` 加了 `chromel-remote-debugging-port`（`CefSettings.remote_debugging_port`），
-让 Playwright / chrome-remote-interface 能挂到已有的页面。
+上游 `4729098` 的移植。`chromel-remote-debugging-port`（nil 或 1024–65535）经
+`module.mm`（`init` 变成 2–3 个参数）传给 `chromel::initialize(bundle, profile, port)`，
+写进 `CefSettings.remote_debugging_port`。两侧都校验非法端口，报错而不是静默忽略。
 
-移植成本：约 30–40 分钟。要动三处我们和上游不同的地方——`initialize(bundle, profile)`
-加第三个可选参数、`module.mm` 的 `Init` 参数校验与预取、`chromel.el` 的
-`chromel--native-init` 调用点。风险低（纯新增开关，默认 nil 不改变行为）。
-
-取舍：只有做自动化/远程调试才值得；它和 B11 配对时价值最大。
+实测：端口 9222 启动后 `curl /json/version` → `Chrome/156.0.8078.80`，
+`/json/list` → `[('page', 'https://example.org/')]`。ERT 57/57。
 
 ### B11 上游有、我们还没有：异步执行页面脚本
 

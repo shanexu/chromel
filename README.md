@@ -281,6 +281,25 @@ Allow https://example.org/ to use location? (y or n)
 
 答案只活在这次 Emacs 会话里：Chromel 不写自己的权限数据库，重启后同一来源会重新询问（除非 Chromium 自己缓存了该决定）。摄像头/麦克风真正要拿到设备流还需要 `--enable-media-stream` 之类的开关，权限放行只是不再被静默拒绝。
 
+## 调试与自动化（CDP）
+
+需要 Playwright、`chrome-remote-interface` 或 DevTools 前端接管页面时，给 Chromel 开一个本地 CDP 端口：
+
+```elisp
+(setq chromel-remote-debugging-port 9222)
+```
+
+重启 Emacs 后，Chromium 会打印 `DevTools listening on ws://127.0.0.1:9222/...`，页面列表可以直接读：
+
+```sh
+curl -s http://127.0.0.1:9222/json/version
+curl -s http://127.0.0.1:9222/json/list
+```
+
+- 端口读一次就固定：改完必须重启 Emacs（CEF 不能在进程内重启）
+- 只监听 `127.0.0.1`；同一台机器上的任何进程都能连上，不需要时把它设回 `nil`
+- 取值必须是 `nil` 或 1024–65535 的整数，否则 `chromel--start` 会直接报错，而不是悄悄忽略
+
 ## 内容拦截（广告/追踪）
 
 Chromel 带一份 uBOL（uBlock Origin Lite）三套列表的编译快照，**默认开启**，不需要装扩展：
