@@ -292,9 +292,15 @@ try:
                     break
                 if status == 0:
                     print(f"FAIL: {script} exited without a result")
+                elif verdicts:
+                    # It reported, then died: that is a real failure, not noise.
+                    print(f"FAIL: {script} exited ({status}) after reporting {verdicts[-1]}")
                 else:
                     print(f"FAIL: GUI process exited ({status}) without a test result")
-                retryable = status != 0 and not (verdicts and verdicts[-1].startswith("FAIL:"))
+                # Retry only a run that produced no verdict at all.  A crash
+                # after PASS is indistinguishable from a real teardown bug, and
+                # hiding it behind a second run is how a regression gets masked.
+                retryable = status != 0 and not verdicts
                 if attempt_number == 1 and retryable:
                     print(f"RETRY: {script} died with {status} and no verdict; running it once more")
                     continue
