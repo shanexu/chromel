@@ -48,6 +48,9 @@
 
 ### 测试与构建
 
+- 新增 `test/gui-keys.el`：页面持焦时 `C-x`、`C-c`、`C-h` 前缀仍完整到达 Emacs；`test-key` 测试钩子因此支持 `ctrl-<字母>`（只存在于测试模式）。
+
+
 - `gui-hold` 的稳态速度断言改成对整段采样做最小二乘斜率（原先逐帧 dy/dt 取 min/max）。实测斜率稳定在 899.9–900.3 px/s，而逐帧值会因一次迟到帧在 691–1164 之间跳——那是采样噪声，不是滚动不匀。单测超时从 55 s 放宽到 90 s，避免机器有负载时把"慢"误判成"失败"。
 - 测试开关拆成三个明确的承诺：`CHROMEL_CEF_TEST_MODE`（存在 `test-*` 钩子）、`CHROMEL_CEF_TEST_QUIET`（不显示/不抢焦点）、`CHROMEL_CEF_TEST_HERMETIC`（mock keychain + 临时 profile），后两者默认跟随 MODE，因此现有测试无需改动；`info()` 会回报三个开关的取值。
 - 生产进程调用 `test-*` 动作现在直接报 `Unknown browser action: <动作>`，不会再被静默吞掉。

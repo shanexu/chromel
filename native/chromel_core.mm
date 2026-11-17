@@ -1102,7 +1102,10 @@ const std::map<std::string, BrowserAction>& browserActions() {
         }
       };
       const bool command = argument.rfind("cmd-", 0) == 0;
-      const std::string name = command ? argument.substr(4) : argument;
+      const bool control = argument.rfind("ctrl-", 0) == 0;
+      const std::string name = command    ? argument.substr(4)
+                               : control ? argument.substr(5)
+                                         : argument;
       if (name != "escape" && name.size() != 1)
         throw std::runtime_error("Unsupported test key");
       // A forwarded Command key must land on a page that owns the keyboard,
@@ -1114,27 +1117,36 @@ const std::map<std::string, BrowserAction>& browserActions() {
           page->browser->GetHost()->SetFocus(true);
         }
       }
-      if (name == "escape") {
-        // A real Escape arrives in an active app whose window is key.  Posted
-        // events to a background app are dropped at random, so make the test
-        // window key first instead of depending on the user's click order.
+      if (name == "escape" || control) {
+        // A real key arrives in an active app whose window is key.  Events for
+        // a background app are dropped at random, so make the test window key
+        // first instead of depending on the user's click order.
         [NSApp activateIgnoringOtherApps:YES];
         [page->container.window makeKeyAndOrderFront:nil];
       }
       NSString* characters = name == "escape" ? @"\x1b" : ns(name);
+      // The unmodified-character field still reads "x": Chromel routes on it,
+      // and a control character there would look like an unknown key.
+      NSString* unmodified = characters;
+      // Control combinations travel as the control character plus the flag,
+      // exactly like a physical key press.
+      if (control) characters = [NSString stringWithFormat:@"%c", static_cast<char>(name[0] & 0x1f)];
       const unsigned short keyCode = name == "escape" ? 53 : virtualCode(name[0]);
       for (auto type : {NSEventTypeKeyDown, NSEventTypeKeyUp}) {
         // Only the key-down types text: a key-up carrying the same characters
         // makes the renderer insert it twice.
         NSString* text = type == NSEventTypeKeyUp ? @"" : characters;
         NSEvent* event = [NSEvent keyEventWithType:type location:NSZeroPoint
-          modifierFlags:command ? NSEventModifierFlagCommand : 0
+          modifierFlags:command   ? NSEventModifierFlagCommand
+                        : control ? NSEventModifierFlagControl
+                                  : 0
           timestamp:NSProcessInfo.processInfo.systemUptime
           windowNumber:page->container.window.windowNumber context:nil characters:text
-          charactersIgnoringModifiers:text isARepeat:NO keyCode:keyCode];
-        // Escape has to be posted, not dispatched: it is only honoured once the
-        // app is active and the run loop reaches it.
-        if (name == "escape") [NSApp postEvent:event atStart:NO];
+          charactersIgnoringModifiers:unmodified isARepeat:NO keyCode:keyCode];
+        // Keys that belong to Emacs have to be posted, not dispatched: sendEvent:
+        // would re-enter AppKit from inside an Emacs timer and the event is
+        // dropped.  Posting works because the app is active and the window key.
+        if (name == "escape" || control) [NSApp postEvent:event atStart:NO];
         else [NSApp sendEvent:event];
       }
     }},

@@ -216,6 +216,7 @@ try:
             ("paste-fixture", "gui-paste.el"),
             ("blocker-fixture", "gui-blocker.el"),
             ("cosmetic:true:true:true", "gui-cosmetics.el"),
+            ("chromel-emacs-restored", "gui-keys.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
         if only:
