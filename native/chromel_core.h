@@ -10,7 +10,8 @@ int api_version();
 // How many CEF browsers (embedded pages or settings windows) are alive.
 // Safe before CefInitialize.
 int browser_count();
-void initialize(const std::string& bundle, const std::string& profile);
+void initialize(const std::string& bundle, const std::string& profile,
+                int debuggingPort = 0);
 long bind_window(const std::string& title);
 bool is_settings_url(const std::string& url);
 

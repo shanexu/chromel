@@ -801,3 +801,13 @@
   (let ((chromel-cosmetics-file "/nonexistent/cosmetics.txt"))
     (cl-letf (((symbol-function 'message) #'ignore))
       (should-not (chromel--cosmetics-apply)))))
+
+(ert-deftest chromel-debugging-port-validation ()
+  (let ((chromel-remote-debugging-port nil))
+    (should-not (chromel--debugging-port)))
+  (dolist (port '(1024 9222 65535))
+    (let ((chromel-remote-debugging-port port))
+      (should (= (chromel--debugging-port) port))))
+  (dolist (port '(t 1023 65536 "9222"))
+    (let ((chromel-remote-debugging-port port))
+      (should-error (chromel--debugging-port) :type 'user-error))))

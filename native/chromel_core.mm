@@ -699,7 +699,7 @@ CefRefPtr<CefClient> App::GetDefaultClient() { return makeSettingsClient(); }
 
 
 namespace chromel {
-void initialize(const std::string& bundle, const std::string& profile) {
+void initialize(const std::string& bundle, const std::string& profile, int debuggingPort) {
   checkThread();
   std::filesystem::create_directories(profile + "/Default");
   const auto canonicalProfile = std::filesystem::canonical(profile).string();
@@ -758,6 +758,9 @@ void initialize(const std::string& bundle, const std::string& profile) {
   CefString(&settings.root_cache_path) = canonicalProfile;
   CefString(&settings.cache_path) = canonicalProfile + "/Default";
   CefString(&settings.log_file) = canonicalProfile + "/cef.log";
+  // 0 keeps Chromium's default (no DevTools endpoint).  Anything else lets
+  // Playwright and friends attach to the pages this process already owns.
+  if (debuggingPort != 0) settings.remote_debugging_port = debuggingPort;
   settings.log_severity = LOGSEVERITY_WARNING;
   // Keep the Chromium subprocess sandbox enabled.  Helpers initialize it
   // before loading the framework.  No --no-sandbox or certificate bypasses.

@@ -495,3 +495,14 @@ GUI 套件共 25 个脚本，覆盖渲染、几何、焦点、滚动、会话、
 | ownsFocus | 页面被选中且没有输入控件在编辑，此时 j/k 表示滚动 |
 | settings window | `chrome://settings` 等受管页面的独立顶层窗口 |
 | test mode | 拆成三个开关：`CHROMEL_CEF_TEST_MODE=1`（存在测试钩子）、`CHROMEL_CEF_TEST_QUIET`（不 Show/Activate/抢焦点，默认跟随 MODE）、`CHROMEL_CEF_TEST_HERMETIC`（mock keychain + 临时 profile，默认跟随 MODE） |
+
+### 4.19 远程调试端口
+
+`chromel-remote-debugging-port` 只做一件事：`initialize()` 把它写进
+`CefSettings.remote_debugging_port`。Chromium 因此在 `127.0.0.1:<port>` 上开
+DevTools 端点，`/json/version` 报 `Chrome/156.0.8078.80`，`/json/list` 列出本进程
+已有的页面——外部工具（Playwright、CDP 客户端）可以接管这些页面，用的就是 Chromel
+自己创建的浏览器，不需要再起一个 Chromium。
+
+三条边界：只能在启动时给（CEF 不能进程内重启）；`0`/`nil` 表示完全不开；端口非法时
+在 Elisp 侧与 `module.mm` 侧各校验一次，报错而不是静默降级。
