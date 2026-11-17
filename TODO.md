@@ -2,7 +2,7 @@
 
 快照：2026-11-15，分支 `topic/blocker`（基于 `master` `a447651`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 56/56（另加 `python3 test/test_blocklist_converter.py` 3 条与 `python3 test/test_cosmetics_converter.py` 9 条），`python3 scripts/test-gui.py` 27 个 PASS、rc=0。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 66/66（另加 `python3 test/test_blocklist_converter.py` 3 条与 `python3 test/test_cosmetics_converter.py` 9 条），`python3 scripts/test-gui.py` 28 个 PASS、rc=0。
 
 ## 已完成（本轮）
 
@@ -102,7 +102,7 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 ### B6-old 旧描述（已完成，留档）
 
-### B7 全局状态（进行中：四刀已落地）
+### B7 ❌ 全局状态（四刀已落地，键盘路径不做）
 21 个全局 defvar、单个 TU、`pages/browsers/settings*` 都是文件级全局。已有 `Page` 结构，但没有会话对象。
 
 **已做（第一刀）**：`Page` 与两张 id→对象表搬进 `native/page.h` / `native/page.mm`，连同 `pageFor`、`ownsFocus`、`stopScroll`、`scrollPage`、`unfocus` 五个按 page 操作的助手。
@@ -118,7 +118,12 @@ GUI 脚本需要显示器与会话，未纳入 CI。
 
 **已做（第四刀）**：事件队列搬进 `native/events.h` / `events.mm` —— `emit`（40 多处调用）、`drainEvents`、`resetEvents`，队列本身（`NSMutableArray`）不再由 core 持有；core 只剩两行 `events() { requireReady(); return drainEvents(); }`。收益不在行数（992 → 982），而在**谁拥有数据**：事件流的唯一入口与唯一出口现在在同一文件里。
 
-**待做**：键盘路径（`routeKeyEvent`/`adaptApplication`/`sendEvent:` swizzle）与 `pages`、`scroll`、`EmacsApp` 深耦合，仍留在 core —— 这是最后一刀，收益最低、风险最高，建议不做；`extern` 换 registry 访问器同理。
+**不做（第五刀）**：只剩键盘路径（`routeKeyEvent` 95 行、`adaptApplication` 的 `sendEvent:` swizzle）。一次独立评审量出的耦合是 6 + 4：路由本身依赖 `pages` 遍历、`Page` 状态、`stopScroll`、`ownsFocus`、`unfocus`、私有 `mainFrame`；swizzle 另加 `routeKeyEvent`、`hostWakeup`、`originalSendEvent`、`handlingEventKey`。这些依赖在 `native/page.h:42-54` 已经导出，所以拆分**不转移所有权，只搬代码**，结果是 core↔keys 双向依赖，总耦合度上升（对比 `events.mm` 那种自包含队列，搬走才是净收益）。行为收益为零，而这块只有 4 个 GUI 脚本覆盖，风险最高。结论：保留在 core，不再拆。
+
+**顺带做完的那一半**：评审指出的真实空白是 `C-x`/`C-c`/`C-h` 前缀没有任何自动化覆盖（`grep -rn "C-x" test/*.el` 零命中，且 `test-key` 只能合成单字符或 `cmd-<字符>`）。已补：
+- `test-key` 支持 `ctrl-<字母>`：`characters` 发控制字符、`charactersIgnoringModifiers` 保持原字母（路由按后者判断），与 Escape 一样用 `postEvent:` 而不是 `sendEvent:`（在 Emacs 定时器里重入 AppKit 会丢事件），并先激活应用、把测试窗口设为 key。
+- 新增 `test/gui-keys.el`：页面持焦时依次注入 `C-x C-h`、`C-c C-h`、`C-h C-h`，用 `read-key-sequence` 断言整段序列到达 Emacs（本地 map 绑定目标序列，5 秒兜底键 `z` 保证失败可见而不是超时）。
+- 反向验证：把 `prefix` 条件改成 `false && …` 后该测试立刻报 `C-x did not reach Emacs: got "\x18z"`，证明它不是空转。
 
 ### B8 ❌ 不修（调研结论：没有替代品）
 调研目标：能否用 `(frame-parameter frame 'window-id)` 直接拿 NSWindow number，从而删掉 `chromel--frame-handle` 里"临时改 title → 按 title 找窗口"的借用。
