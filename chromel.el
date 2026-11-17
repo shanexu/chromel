@@ -176,6 +176,9 @@ immediate extra frame — which shows up as uneven scroll velocity.")
 (defvar chromel--session-inhibit nil)
 (defvar chromel--shutting-down nil)
 (defvar chromel--eval-counter 0)
+;; Token -> request plist for `chromel-execute-script'.  Kept separate from the
+;; private eval handshake so a page callback can never see an internal result.
+(defvar chromel--script-requests (make-hash-table :test #'equal))
 (defvar chromel--idle-since nil
   "Start of the grace period before the pump is allowed to stop.
 CEF closes browsers asynchronously, so `chromel--pages' empties before the
@@ -423,6 +426,25 @@ native side has finished tearing them down; pumping must continue until then.")
            (let ((reply (json-parse-string value :object-type 'plist)))
              (when (equal chromel--eval-token (plist-get reply :token))
                (setq chromel--eval-reply reply))))
+          ("script"
+           (let* ((reply (json-parse-string value :object-type 'plist))
+                  (token (plist-get reply :token))
+                  (request (gethash token chromel--script-requests)))
+             (when (and request (eq buffer (plist-get request :buffer))
+                        (eql id (plist-get request :id)))
+               (if (eq t (plist-get reply :ok))
+                   (condition-case err
+                       (chromel--script-finish
+                        token (if (eq t (plist-get reply :undefined)) :undefined
+                                (json-parse-string (plist-get reply :result)
+                                                   :object-type 'alist :array-type 'array
+                                                   :null-object :null :false-object :false)))
+                     (error (chromel--script-finish
+                             token nil (list :type 'result :message (error-message-string err)))))
+                 (chromel--script-finish
+                  token nil (list :type (if (equal (plist-get reply :error) "navigation")
+                                           'navigation 'javascript)
+                                  :message (plist-get reply :result)))))))
           ("closed"
            (remhash id chromel--pages)
            (setq chromel--id nil chromel--status "Closed")
@@ -524,6 +546,7 @@ every manual tick and multiply the timer storm."
   (unless chromel--timer (chromel--ensure-timer)))
 
 (defun chromel--kill-buffer ()
+  (chromel--script-abort-buffer (current-buffer))
   (let* ((buffer (current-buffer))
          (index (cl-position buffer (chromel--buffers))))
     (when (and index (not chromel--session-inhibit) (not chromel--shutting-down)
@@ -1341,6 +1364,97 @@ control's scrollable ancestor first, then that frame's page."
 (defun chromel--json (object)
   "Serialize OBJECT as JSON text suitable for the native UTF-8 interface."
   (decode-coding-string (json-serialize object) 'utf-8-unix))
+
+(defun chromel--script-callback (buffer callback value failure)
+  "Deliver VALUE to CALLBACK outside native event processing.
+Use BUFFER when it is still live.  FAILURE indicates an error result."
+  (condition-case err
+      (if callback
+          (if (buffer-live-p buffer)
+              (with-current-buffer buffer (funcall callback value))
+            (funcall callback value))
+        (when failure (message "Chromel script: %s" (plist-get value :message))))
+    ((error quit) (message "Chromel script callback: %s" (error-message-string err)))))
+
+(defun chromel--script-finish (token value &optional failure cancel)
+  "Complete TOKEN once with VALUE or FAILURE; optionally CANCEL native tracking."
+  (when-let* ((request (gethash token chromel--script-requests)))
+    (remhash token chromel--script-requests)
+    (when-let* ((timer (plist-get request :timer))) (cancel-timer timer))
+    (when cancel
+      (ignore-errors
+        (chromel--native-command (plist-get request :id) "cancel-script" token)))
+    (let ((callback (plist-get request (if failure :on-error :callback))))
+      (when (or callback failure)
+        (run-at-time 0 nil #'chromel--script-callback
+                     (plist-get request :buffer) callback (or failure value) failure)))
+    t))
+
+(defun chromel--script-timeout (token)
+  "Expire the pending script request TOKEN."
+  (chromel--script-finish token nil
+                          '(:type timeout :message "JavaScript request timed out") t))
+
+(defun chromel--script-abort-buffer (buffer)
+  "Cancel outstanding script requests belonging to BUFFER."
+  (let (tokens)
+    (maphash (lambda (token request)
+               (when (eq buffer (plist-get request :buffer)) (push token tokens)))
+             chromel--script-requests)
+    (dolist (token tokens)
+      (chromel--script-finish token nil
+                              '(:type closed :message "Chromel page was closed") t))))
+
+;;;###autoload
+(cl-defun chromel-execute-script (buffer script &optional callback
+                                        &key on-error (timeout 5))
+  "Asynchronously evaluate JavaScript SCRIPT in BUFFER's main document.
+BUFFER is a live Chromel buffer or its name; nil means the current buffer.
+
+Call CALLBACK with the result, converted from JSON: objects become alists with
+symbol keys, arrays vectors, false :false, null :null and undefined :undefined.
+JSON serialization rules apply; cyclic objects, BigInt and other
+non-serializable results fail.  Promise results are not awaited and fail.
+
+ON-ERROR receives a plist with :type and :message.  Types are javascript,
+result, timeout, navigation, closed, cancelled and transport.  Without
+ON-ERROR, failures are reported in the echo area.  Callbacks run later through
+Emacs timers, in BUFFER when it is still live, and their errors never stop the
+browser pump.  Argument errors signal immediately.
+
+TIMEOUT is a positive number of seconds, default 5.  Return a request token for
+`chromel-cancel-script'.  Several requests may be outstanding.  Cancellation and
+timeout discard the result; they do not interrupt JavaScript or undo side
+effects.  No remote debugging port is needed."
+  (unless (stringp script) (signal 'wrong-type-argument (list 'stringp script)))
+  (dolist (fn (list callback on-error))
+    (unless (or (null fn) (functionp fn))
+      (signal 'wrong-type-argument (list 'functionp fn))))
+  (unless (and (numberp timeout) (> timeout 0) (< timeout 1.0e+INF))
+    (user-error "TIMEOUT must be a finite positive number"))
+  (let ((target (if buffer (get-buffer buffer) (current-buffer))))
+    (unless (and (buffer-live-p target)
+                 (buffer-local-value 'chromel--id target))
+      (user-error "BUFFER must contain a live Chromel page"))
+    (let* ((token (format "chromel-script-%d" (cl-incf chromel--eval-counter)))
+           (id (buffer-local-value 'chromel--id target))
+           (request (list :buffer target :id id :callback callback :on-error on-error
+                          :timer (run-at-time timeout nil #'chromel--script-timeout token))))
+      (puthash token request chromel--script-requests)
+      (condition-case err
+          (chromel--native-command id "execute-script"
+                                   (chromel--json (list :token token :script script)))
+        ((error quit)
+         (chromel--script-finish token nil
+                                 (list :type 'transport :message (error-message-string err)) t)))
+      token)))
+
+(defun chromel-cancel-script (token)
+  "Cancel the pending request TOKEN returned by `chromel-execute-script'.
+Notify its error callback with type `cancelled'.  Return t if pending, nil if
+already completed.  This does not interrupt JavaScript execution."
+  (chromel--script-finish token nil
+                          '(:type cancelled :message "JavaScript request cancelled") t))
 
 (defun chromel--eval (script)
   "Evaluate SCRIPT in this page and parse its JSON string result.

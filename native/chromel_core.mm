@@ -123,6 +123,18 @@ void checkThread() {
 }
 // page.mm lives in another translation unit; it can still ask the same
 // question without duplicating the message or the state it reads.
+// Reports one `chromel-execute-script` outcome.  ERROR separates the page's own
+// throwing code from a navigation that threw the request away; either way the
+// request is reported exactly once and then forgotten.
+void scriptResult(int id, const std::string& token, bool ok, const std::string& result,
+                  bool undefined = false, NSString* error = @"javascript") {
+  NSDictionary* response = @{@"token": ns(token), @"ok": @(ok), @"result": ns(result),
+                             @"undefined": @(undefined), @"error": error};
+  NSData* data = [NSJSONSerialization dataWithJSONObject:response options:0 error:nil];
+  NSString* text = data ? [[NSString alloc] initWithData:data encoding:NSUTF8StringEncoding] : nil;
+  emit(id, @"script", text ?: @"{}");
+}
+
 void requireReady() { requireBackendReady(); }
 // CEF may hand out a null or detached main frame while a page is tearing down.
 // Every caller must tolerate that instead of dereferencing it.
@@ -411,12 +423,23 @@ class Client final : public CefClient,
       }
       return true;
     }
-    if (source != PID_RENDERER || message->GetName() != "chromel.eval.result" ||
-        !frame || !frame->IsMain())
-      return false;
+    if (source != PID_RENDERER || !frame || !frame->IsMain()) return false;
+    const std::string name = message->GetName().ToString();
+    if (name != "chromel.eval.result" && name != "chromel.execute-script.result") return false;
     auto args = message->GetArgumentList();
-    if (!args || args->GetSize() < 3) return true;
+    if (!args) return true;
     auto found = pages.find(id_);
+    if (name == "chromel.execute-script.result") {
+      // token, ok, result, undefined (renderer only sends the 4th argument for
+      // this message, so a 3-argument reply means an older renderer).
+      if (args->GetSize() < 4 || found == pages.end() || found->second->closing) return true;
+      const auto scriptToken = args->GetString(0).ToString();
+      if (scriptToken.empty() || !found->second->pendingScripts.erase(scriptToken)) return true;
+      scriptResult(id_, scriptToken, args->GetBool(1), args->GetString(2).ToString(),
+                   args->GetBool(3));
+      return true;
+    }
+    if (args->GetSize() < 3) return true;
     const auto token = args->GetString(0).ToString();
     if (found != pages.end() && !found->second->closing &&
         !token.empty() && found->second->pendingEval == token) {
@@ -557,6 +580,17 @@ class Client final : public CefClient,
   }
   void OnLoadingStateChange(CefRefPtr<CefBrowser>, bool loading, bool, bool) override {
     emit(id_, @"loading", loading ? @"1" : @"0");
+  }
+  void OnLoadStart(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, TransitionType) override {
+    if (!frame || !frame->IsMain()) return;
+    auto found = pages.find(id_);
+    if (found == pages.end() || found->second->closing) return;
+    // A navigation replaces the V8 context, so a pending script can never be
+    // answered.  Report each one instead of letting it hit the 5 s timeout.
+    for (const auto& token : found->second->pendingScripts)
+      scriptResult(id_, token, false, "Page navigated before the script completed", false,
+                   @"navigation");
+    found->second->pendingScripts.clear();
   }
   void OnLoadEnd(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame, int status) override {
     if (frame->IsMain() && status < 400) emit(id_, @"loaded");
@@ -858,6 +892,29 @@ void sendHeldTestKey(const std::shared_ptr<Page>& page, const std::string& actio
   else [NSApp sendEvent:event];
 }
 
+// Shared by "eval" (private, JSON-string-only) and "execute-script" (public API:
+// any JSON value, undefined and errors reported).  The renderer evaluates once
+// and serializes the value; nothing is ever evaluated twice.
+void sendScript(const std::shared_ptr<Page>& page, const std::string& argument, bool execute) {
+  NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
+  NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
+  if (![request isKindOfClass:NSDictionary.class] ||
+      ![request[@"token"] isKindOfClass:NSString.class] ||
+      ![request[@"script"] isKindOfClass:NSString.class])
+    throw std::runtime_error("Invalid JavaScript request");
+  const auto token = utf8(request[@"token"]);
+  auto frame = mainFrame(page->browser);
+  if (!frame) throw std::runtime_error("The browser has no main frame");
+  if (execute)
+    page->pendingScripts.insert(token);
+  else
+    page->pendingEval = token;
+  auto message = CefProcessMessage::Create(execute ? "chromel.execute-script" : "chromel.eval");
+  message->GetArgumentList()->SetString(0, token);
+  message->GetArgumentList()->SetString(1, utf8(request[@"script"]));
+  frame->SendProcessMessage(PID_RENDERER, message);
+}
+
 const std::map<std::string, BrowserAction>& browserActions() {
   static const std::map<std::string, BrowserAction> table = {
     {"scroll-settings", [](const std::shared_ptr<Page>& page, const std::string& argument) {
@@ -978,22 +1035,13 @@ const std::map<std::string, BrowserAction>& browserActions() {
       browser->GetHost()->SendMouseClickEvent(event, MBT_LEFT, true, 1);
     }},
     {"eval", [](const std::shared_ptr<Page>& page, const std::string& argument) {
-      NSData* data = [ns(argument) dataUsingEncoding:NSUTF8StringEncoding];
-      NSDictionary* request = [NSJSONSerialization JSONObjectWithData:data options:0 error:nil];
-      if (![request isKindOfClass:NSDictionary.class] ||
-          ![request[@"token"] isKindOfClass:NSString.class] ||
-          ![request[@"script"] isKindOfClass:NSString.class])
-        throw std::runtime_error("Invalid JavaScript request");
-      page->pendingEval = utf8(request[@"token"]);
-      auto frame = mainFrame(page->browser);
-      if (!frame) {
-        page->pendingEval.clear();
-        throw std::runtime_error("The browser has no main frame");
-      }
-      auto message = CefProcessMessage::Create("chromel.eval");
-      message->GetArgumentList()->SetString(0, page->pendingEval);
-      message->GetArgumentList()->SetString(1, utf8(request[@"script"]));
-      frame->SendProcessMessage(PID_RENDERER, message);
+      sendScript(page, argument, false);
+    }},
+    {"execute-script", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      sendScript(page, argument, true);
+    }},
+    {"cancel-script", [](const std::shared_ptr<Page>& page, const std::string& argument) {
+      page->pendingScripts.erase(argument);
     }},
     {"javascript", [](const std::shared_ptr<Page>& page, const std::string& argument) {
       // Fire-and-forget channel for Lisp callers that need no reply; the reply

@@ -2,6 +2,7 @@
 #pragma once
 #import <Cocoa/Cocoa.h>
 #include <map>
+#include <set>
 #include <memory>
 #include <string>
 #include "include/cef_browser.h"
@@ -22,6 +23,8 @@ struct Page {
   bool awaitingBrowser = false;
   bool selected = false;
   std::string pendingEval;
+  // Tokens of `execute-script` requests still waiting for a renderer reply.
+  std::set<std::string> pendingScripts;
   std::string pendingFind;
   int completedFind = -1;
   std::string inputFrame;

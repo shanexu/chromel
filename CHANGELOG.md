@@ -36,6 +36,7 @@
 - 内容拦截现在也藏广告位：`data/cosmetics.txt`（uBOL 快照编译，21,164 个站点）在主框架与子框架注入 `display: none`，可换文件或用 `chromel-cosmetics-file` 指向自己的清单。
 - 离开网页后把键盘交还给真正的编辑器：Emacs 31 的 `contentView` 是包住 `EmacsView` 的普通 `NSView`，以前聚焦的是这层 wrapper，导致 `Esc`/Meow 键位不再由 `EmacsView` 解码。
 - 新增 `chromel-remote-debugging-port`：给 Chromium 开一个本地 CDP 端点，Playwright 等工具可以接管已有的页面（启动时读一次，默认关闭）。
+- 新增 `chromel-execute-script`／`chromel-cancel-script`：异步执行页面脚本，结果按 JSON 转换，支持并发、超时、导航取消与错误回调（不阻塞输入，不需要 CDP）。
 ### 内部结构
 - 事件队列（`emit` / `drainEvents` / `resetEvents`）移入 `native/events.mm`：队列的所有权不再散落在宿主层，`chromel_core.mm` 只保留一个两行的 `events()` 适配器。
 - 管理窗口（settings / 密码管理器 / 扩展 / Web Store）整体移入 `native/settings.mm`：它自己的八个全局、四个 CEF 委托、URL 白名单与开关都在一处，宿主只通过 `openSettings`/`closeSettings`/`inspectSettings` 等语义接口访问；`chromel_core.mm` 1186 → 992 行。
