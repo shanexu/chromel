@@ -228,55 +228,79 @@ try:
                                              "password-seed", "management"):
                 tests.insert(0, ("chromel-emacs-ready", "gui-smoke.el"))
         for expected, script in tests:
-            route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
-                     'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html',
-                     'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker', 'gui-cosmetics.el': '/cosmetic'}.get(script, '/fixture')
-            test_url = url.replace('/fixture', route)
-            result = pathlib.Path(temp) / "result"
-            result.unlink(missing_ok=True)
-            env = dict(os.environ, CHROMEL_TEST_PROFILE=temp + "/profile",
-                       CHROMEL_TEST_RESULT=str(result), CHROMEL_CEF_TEST_MODE="1",
-                       CHROMEL_TEST_URL=test_url, CHROMEL_TEST_EXPECT_TITLE=expected)
-            if script == "gui-settings.el":
-                env["CHROMEL_TEST_SETTINGS_PHASE"] = expected.removeprefix("settings-")
-            if script == "gui-passwords.el":
-                env["CHROMEL_TEST_PASSWORD_PHASE"] = expected.removeprefix("password-")
-            if script == "gui-session.el":
-                env["CHROMEL_TEST_SESSION_PHASE"] = expected.removeprefix("session-")
-            if script == "gui-escape.el":
-                env["CHROMEL_TEST_FULLSCREEN"] = "1"
-            log = pathlib.Path(temp) / "emacs.log"
-            with log.open("w") as output:
-                process = subprocess.Popen(
-                    [emacs, "-Q", "--eval", "(setq native-comp-jit-compilation nil)",
-                     "-L", str(root),
-                     # Every GUI script runs in the same frame: geometry
-                     # assertions and hint labels depend on it.
-                     "-l", str(root / "test" / "gui-frame.el"),
-                     "-l", str(root / "test" / script),
-                     # Cocoa reads this at startup; keep it away from Emacs's
-                     # file-argument parser.  Avoid crash-recovery modal dialogs
-                     # in disposable test processes without changing defaults.
-                     "--eval", "(setq command-line-args-left nil)",
-                     "-ApplePersistenceIgnoreState", "YES"],
-                    env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
-                try:
-                    # 55 s was tight enough that a loaded machine (parallel
-                    # builds, another agent) turned a slow test into a failure.
-                    status = process.wait(timeout=90)
-                except subprocess.TimeoutExpired:
-                    os.killpg(process.pid, signal.SIGKILL)
-                    process.wait()
-                    status = 124
-            print(log.read_text())
-            if result.is_file():
-                print(result.read_text())
-            else:
-                print(f"FAIL: GUI process exited ({status}) without a test result")
-            if status:
-                raise SystemExit(status)
+            def attempt(expected=expected, script=script):
+                """Run one GUI script; returns (status, log text, result text)."""
+                route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
+                         'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html',
+                         'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker', 'gui-cosmetics.el': '/cosmetic'}.get(script, '/fixture')
+                test_url = url.replace('/fixture', route)
+                result = pathlib.Path(temp) / "result"
+                result.unlink(missing_ok=True)
+                env = dict(os.environ, CHROMEL_TEST_PROFILE=temp + "/profile",
+                           CHROMEL_TEST_RESULT=str(result), CHROMEL_CEF_TEST_MODE="1",
+                           CHROMEL_TEST_URL=test_url, CHROMEL_TEST_EXPECT_TITLE=expected)
+                if script == "gui-settings.el":
+                    env["CHROMEL_TEST_SETTINGS_PHASE"] = expected.removeprefix("settings-")
+                if script == "gui-passwords.el":
+                    env["CHROMEL_TEST_PASSWORD_PHASE"] = expected.removeprefix("password-")
+                if script == "gui-session.el":
+                    env["CHROMEL_TEST_SESSION_PHASE"] = expected.removeprefix("session-")
+                if script == "gui-escape.el":
+                    env["CHROMEL_TEST_FULLSCREEN"] = "1"
+                log = pathlib.Path(temp) / "emacs.log"
+                with log.open("w") as output:
+                    process = subprocess.Popen(
+                        [emacs, "-Q", "--eval", "(setq native-comp-jit-compilation nil)",
+                         "-L", str(root),
+                         # Every GUI script runs in the same frame: geometry
+                         # assertions and hint labels depend on it.
+                         "-l", str(root / "test" / "gui-frame.el"),
+                         "-l", str(root / "test" / script),
+                         # Cocoa reads this at startup; keep it away from Emacs's
+                         # file-argument parser.  Avoid crash-recovery modal dialogs
+                         # in disposable test processes without changing defaults.
+                         "--eval", "(setq command-line-args-left nil)",
+                         "-ApplePersistenceIgnoreState", "YES"],
+                        env=env, stdout=output, stderr=subprocess.STDOUT, start_new_session=True)
+                    try:
+                        # 90 s was still tight enough that a loaded machine
+                        # (parallel builds, another agent) turned a slow test
+                        # into a failure; a bogus kill is retried below.
+                        status = process.wait(timeout=90)
+                    except subprocess.TimeoutExpired:
+                        os.killpg(process.pid, signal.SIGKILL)
+                        process.wait()
+                        status = 124
+                text = log.read_text()
+                result_text = result.read_text() if result.is_file() else ""
+                return status, text, result_text, test_url
+
+            # A machine under load can kill a disposable Emacs that was making
+            # progress (we have seen -9 and 124 without a single assertion
+            # failing).  One retry separates that noise from a real hang; a
+            # script that reported FAIL is never retried.
+            for attempt_number in (1, 2):
+                status, text, result_text, test_url = attempt()
+                print(text)
+                if result_text:
+                    print(result_text)
+                # Scripts may append a trace before the verdict; look for the
+                # verdict line anywhere in the file.
+                verdicts = [line for line in result_text.splitlines()
+                            if line.startswith(("PASS:", "FAIL:"))]
+                if status == 0 and verdicts and verdicts[-1].startswith("PASS:"):
+                    break
+                if status == 0:
+                    print(f"FAIL: {script} exited without a result")
+                else:
+                    print(f"FAIL: GUI process exited ({status}) without a test result")
+                retryable = status != 0 and not (verdicts and verdicts[-1].startswith("FAIL:"))
+                if attempt_number == 1 and retryable:
+                    print(f"RETRY: {script} died with {status} and no verdict; running it once more")
+                    continue
+                raise SystemExit(status if status else 1)
             if script in ("gui-settings.el", "gui-passwords.el", "gui-management.el"):
-                assert "Chromel: skipping CefShutdown" not in log.read_text(), "Settings prevented clean CEF shutdown"
+                assert "Chromel: skipping CefShutdown" not in text, "Settings prevented clean CEF shutdown"
             history = json.loads((pathlib.Path(temp) / "profile/history.json").read_text())
             assert any(entry["url"] == test_url for entry in history), "History was not saved"
         print("PASS: Cookie, localStorage and history persist across two Emacs processes")

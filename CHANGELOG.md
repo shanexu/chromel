@@ -73,6 +73,7 @@
 - CI：`elisp` 作业改到 `ubuntu-latest`（`emacs-nox`），依赖原生模块的 5 条 ERT 用 `chromel-test--module-available-p` 跳过，其余在 Linux 上照跑；`native` 作业因托管 macOS runner 不可用改为手动触发。
 - 提醒：`.elc` 已被 `.gitignore` 忽略，但它只要还在磁盘上就会被 `load` 优先加载——改了 `.el` 却测到旧逻辑（本轮亲历：API 版本升到 2 后 ERT 仍报 `(eql 2 1)`）。测试前先删 `chromel.elc`。
 
+- GUI 套件在被负载杀掉（超时或 SIGKILL、且脚本没给出 PASS/FAIL）时自动重试一次，两次都失败才算失败。
 ### 文档
 
 - 新增 `docs/architecture.md`：分层、外部消息泵、视图嵌入与坐标系、事件/命令、JS 往返、键盘双路径、焦点、生命周期、不变量、扩展点。
