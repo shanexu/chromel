@@ -86,13 +86,15 @@ EMACS_INCLUDE_DIR=/path/to/emacs/include ./scripts/build.sh
 ;; 可选；必须在首次打开网页之前设置。
 ;; (setq chromel-data-directory (expand-file-name "chromel/" user-emacs-directory))
 ;; (setq chromel-home-url "https://example.org")
+;; 打开网页后不把键盘交给页面（默认交给页面）。
+;; (setq chromel-focus-on-open nil)
 ```
 
 执行 `M-x chromel` 输入地址。也可调用 `(chromel "https://example.org")`。无协议域名默认使用 HTTPS，`localhost:端口` 默认 HTTP，包含空格的输入作为搜索词。
 
 ## 在 Emacs 与网页间切换
 
-用 `M-x chromel` 新建网页后自动选中所在窗口并聚焦网页；`Esc` 或 `C-g` 返回 Emacs，按 `i` 或点击网页重新进入网页输入。通过提示点击按钮或链接后保留 Emacs 命令焦点，可以直接再次按 `f`；普通链接或弹窗产生的前台新 buffer 也会选中并保留命令焦点；`F` 和 `M-f` 打开的链接留在后台。选择输入框、编辑区或下拉框时才进入网页输入。网页聚焦时，`C-x`、`C-c`、`C-h` 和 `M-x` 会交回 Emacs；非输入控件中的 `j` / `k` 用于滚动，其他输入交给 Chromium。页面中的复制粘贴使用 macOS 的 `s-c` / `s-v`。浏览器 buffer 内的独立 `Esc` 键按 `C-g` 处理，用于取消或返回命令状态，不再传给网页触发退出全屏；其他 buffer 的按键保持不变。
+用 `M-x chromel` 新建网页后自动选中所在窗口并聚焦网页（`chromel-focus-on-open` 设为 nil 时只选中、不聚焦，之后用 `i` 或点击页面才进入网页输入）；`Esc` 或 `C-g` 返回 Emacs，按 `i` 或点击网页重新进入网页输入。通过提示点击按钮或链接后保留 Emacs 命令焦点，可以直接再次按 `f`；普通链接或弹窗产生的前台新 buffer 也会选中并保留命令焦点；`F` 和 `M-f` 打开的链接留在后台。选择输入框、编辑区或下拉框时才进入网页输入。网页聚焦时，`C-x`、`C-c`、`C-h` 和 `M-x` 会交回 Emacs；非输入控件中的 `j` / `k` 用于滚动，其他输入交给 Chromium。页面中的复制粘贴使用 macOS 的 `s-c` / `s-v`。浏览器 buffer 内的独立 `Esc` 键按 `C-g` 处理，用于取消或返回命令状态，不再传给网页触发退出全屏；其他 buffer 的按键保持不变。
 
 | 按键 / 命令 | 操作 |
 |---|---|

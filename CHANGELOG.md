@@ -17,6 +17,8 @@
 - 渲染进程崩溃时不再留下白屏：`Client::OnRenderProcessTerminated` 上报 `crashed`，标签切到 `data:text/html` 错误页（含 `status`/`code`/原因），`r` 回到崩溃前的 URL，`mode-line` 期间显示 `Crashed`。
 
 ### 交互
+
+- 新增 `chromel-focus-on-open`：设为 nil 后打开网页只选中窗口、不把键盘交给页面。
 - 页面里的标准编辑快捷键现在真的可用：页面持焦时 `⌘V`、`⌘C`、`⌘X`、`⌘A`、`⌘Z`（以及 `⌘⇧Z`）分别映射到粘贴、复制、剪切、全选、撤销、重做。此前这些键被转发进 Emacs，Chromium 永远收不到编辑命令，剪贴板里的内容粘不进输入框。
 - 代理可用 PAC 配置：`chromel-proxy-pac-file` 指向 PAC 文件或 URL（`--proxy-pac-url`）。Chromium 只在启动时读一次，改完要重启 Emacs；`file://` PAC 在这个构建里取不到，所以文件路径由 Chromel 在 `127.0.0.1` 上临时提供一个只读 HTTP 服务。`scripts/smartproxy-to-pac.py` 可以把 SmartProxy 备份转成 PAC，并用 `--fetch-proxy` 展开 gfwlist 之类的订阅。
 - 权限请求有了回应：通知、地理位置、摄像头/麦克风、剪贴板读取等由 `CefPermissionHandler` 接住，在回显区问一句 `Allow <origin> to use <name>?`，答案按「来源 + 权限」记住到本次会话结束；`chromel-permission-policy` 可以预置放行/拒绝。以前这些请求在 Alloy 风格下落到默认处理 = 静默拒绝。

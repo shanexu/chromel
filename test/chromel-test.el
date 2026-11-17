@@ -951,3 +951,13 @@
       (sleep-for 0.02)
       (should (= result 2))
       (should (= 0 (hash-table-count chromel--script-requests))))))
+
+(ert-deftest chromel-focus-on-open-obeys-the-option ()
+  (let ((chromel-focus-on-open t))
+    (should (chromel--focus-on-open-p nil))
+    (should-not (chromel--focus-on-open-p t))
+    (cl-letf (((symbol-function 'active-minibuffer-window)
+               (lambda () (selected-window))))
+      (should-not (chromel--focus-on-open-p nil))))
+  (let ((chromel-focus-on-open nil))
+    (should-not (chromel--focus-on-open-p nil))))

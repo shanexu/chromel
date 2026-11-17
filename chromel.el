@@ -93,6 +93,14 @@ its result, so nothing can report success or failure.  Set this to nil to
 confine scripting to the tokenized `chromel--eval' path; hint overlays then
 cannot clean themselves up, so re-run `chromel-follow' to clear them."
   :type 'boolean)
+(defcustom chromel-focus-on-open t
+  "Send keyboard focus to the page when one opens in the current window.
+Set this to nil to keep Emacs command focus after `chromel', so pages are
+driven with the browser's own keys (j/k, f, o …) from Emacs.  Background
+opens (F, M-f) never take focus, and a prompt that is already reading input
+is never interrupted; switching between existing tabs keeps Emacs focus
+either way (see `chromel--select-buffer')."
+  :type 'boolean)
 (defcustom chromel-history-limit 1000 "Maximum number of saved history entries."
   :type 'natnum)
 (defcustom chromel-closed-tab-limit 30
@@ -1047,6 +1055,10 @@ The matching rules live in the native layer, so Lisp and CEF cannot drift apart.
        (chromel--native-is-settings-url url)))
 
 ;;;###autoload
+(defun chromel--focus-on-open-p (background)
+  "Return non-nil when a newly opened page should take the keyboard."
+  (and chromel-focus-on-open (not background) (not (active-minibuffer-window))))
+
 (defun chromel (&optional url background)
   "Open URL in a new browser buffer.
 With BACKGROUND non-nil, leave the selected buffer and keyboard focus alone.
@@ -1065,7 +1077,7 @@ Management and Chrome Web Store URLs open a separate window and return nil."
               (with-current-buffer buffer
                 (chromel--ensure-browser)
                 (chromel--sync)
-                (unless (or background (active-minibuffer-window)) (chromel-focus)))
+                (when (chromel--focus-on-open-p background) (chromel-focus)))
               (unless background (setq chromel--last-selected-tab buffer)))
           ((error quit)
            (when (buffer-live-p buffer) (kill-buffer buffer))
