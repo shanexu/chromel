@@ -33,20 +33,56 @@ class RendererApp final : public CefApp, public CefRenderProcessHandler {
   }
   bool OnProcessMessageReceived(CefRefPtr<CefBrowser>, CefRefPtr<CefFrame> frame,
                                 CefProcessId source, CefRefPtr<CefProcessMessage> message) override {
-    if (source != PID_BROWSER || message->GetName() != "chromel.eval" || !frame->IsMain())
+    const bool execute = message->GetName() == "chromel.execute-script";
+    if (source != PID_BROWSER || (!execute && message->GetName() != "chromel.eval") ||
+        !frame || !frame->IsMain())
       return false;
     auto input = message->GetArgumentList();
-    auto reply = CefProcessMessage::Create("chromel.eval.result");
+    if (!input || input->GetSize() < 2) return true;
+    auto reply = CefProcessMessage::Create(execute ? "chromel.execute-script.result"
+                                                   : "chromel.eval.result");
     auto output = reply->GetArgumentList();
     output->SetString(0, input->GetString(0));
     output->SetBool(1, false);
     output->SetString(2, "Page JavaScript context is not ready");
+    if (execute) output->SetBool(3, false);
     auto context = frame->GetV8Context();
     if (context && context->Enter()) {
       CefRefPtr<CefV8Value> value;
       CefRefPtr<CefV8Exception> exception;
       const bool ok = context->Eval(input->GetString(1), "", 1, value, exception);
-      if (ok && value && value->IsString()) {
+      if (execute && ok && value) {
+        if (value->IsUndefined()) {
+          output->SetBool(1, true);
+          output->SetBool(3, true);
+          output->SetString(2, "");
+        } else if (value->IsPromise()) {
+          // Awaiting would need a microtask loop the renderer does not have.
+          output->SetString(2, "Promise results are not awaited; return a synchronous value");
+        } else {
+          // Serialize the value, not the source: top-level JavaScript keeps its
+          // normal semantics and the script is never evaluated twice.
+          CefRefPtr<CefV8Value> serializer;
+          CefRefPtr<CefV8Exception> serializationException;
+          if (context->Eval("(value => JSON.stringify(value))", "", 1, serializer,
+                            serializationException) &&
+              serializer && serializer->IsFunction()) {
+            auto encoded = serializer->ExecuteFunction(nullptr, {value});
+            if (encoded && encoded->IsString()) {
+              output->SetBool(1, true);
+              output->SetString(2, encoded->GetStringValue());
+            } else {
+              auto error = serializer->GetException();
+              output->SetString(2, error ? error->GetMessage()
+                                         : CefString("Result is not JSON-serializable"));
+            }
+          } else {
+            output->SetString(2, serializationException
+                                     ? serializationException->GetMessage()
+                                     : CefString("Unable to serialize JavaScript result"));
+          }
+        }
+      } else if (ok && value && value->IsString()) {
         output->SetBool(1, true);
         output->SetString(2, value->GetStringValue());
       } else {

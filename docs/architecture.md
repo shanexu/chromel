@@ -506,3 +506,20 @@ DevTools 端点，`/json/version` 报 `Chrome/156.0.8078.80`，`/json/list` 列�
 
 三条边界：只能在启动时给（CEF 不能进程内重启）；`0`/`nil` 表示完全不开；端口非法时
 在 Elisp 侧与 `module.mm` 侧各校验一次，报错而不是静默降级。
+
+### 4.20 异步执行页面脚本
+
+`execute-script` 与私有的 `eval` 共用一条渲染进程 IPC 通道，但语义不同：
+
+- 浏览器侧 `sendScript()` 把 `{token, script}` 发成 `chromel.execute-script`，并把 token 记进
+  `Page::pendingScripts`（一个 set，允许并发多请求）；`eval` 仍然只有一个 `pendingEval`。
+- 渲染进程在 `helper.cc` 里 **只评估一次**：`context->Eval(源码)` 拿到值，再用
+  `JSON.stringify(value)` 序列化。所以顶层语句保留正常语义，也不会因为"先求值再重放"执行两遍。
+- 三种特殊结果：`undefined` 用 `undefined` 位单独上报；Promise 直接报错（渲染进程没有
+  microtask 循环）；不可序列化的值报 `Result is not JSON-serializable`。
+- 中途导航会换掉 V8 context，`OnLoadStart` 把该页所有 pending token 逐个以 `error: navigation`
+  上报并清空，否则它们只能等 5 秒超时。
+- Elisp 侧 `chromel--script-requests` 以 token 为键保存 buffer／回调／超时定时器；
+  回调经 `run-at-time 0` 投递，因此可以安全地在回调里再调 `chromel-execute-script`。
+  超时、取消、关页面（`chromel--script-abort-buffer` 挂在 `chromel--kill-buffer` 里）都会
+  先 `remhash` 再回调，保证结果只送达一次。

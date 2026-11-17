@@ -139,95 +139,14 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 实测：端口 9222 启动后 `curl /json/version` → `Chrome/156.0.8078.80`，
 `/json/list` → `[('page', 'https://example.org/')]`。ERT 57/57。
 
-### B11 上游有、我们还没有：异步执行页面脚本
+### B11 ✅ 异步执行页面脚本
 
-上游 `1aeb1e1` 加了 `chromel-execute-script`：回调、超时、取消，能 await promise
-（`helper.cc` 里改了渲染侧的注入方式）。我们现在只有 `chromel--eval`——同步忙等最多
-5 秒，期间泵被占用，页面里的长任务会直接拖住 Emacs。
+上游 `1aeb1e1` 的移植。`chromel-execute-script` / `chromel-cancel-script`：token + 超时 +
+`on-error`，渲染进程只评估一次并 `JSON.stringify`，`OnLoadStart` 把导航打断的请求以
+`navigation` 上报，回调经定时器投递所以不阻塞泵。`chromel--eval` 的私有握手保持不动。
 
-移植成本：约 2–3 小时，432 行，撞两处我们改写过的地方（`browserActions()` 命令表、
-`Client::OnProcessMessageReceived` 的 eval 分支）。建议单独一个 PR，先补 ERT（token
-registry、超时、取消），再动 native。
+实测（`build/EmacsChromel.app` + 临时 profile）：`({a:1,b:[true,null,'x']})` →
+`((a . 1) (b . [t :null "x"]))`；`undefined` → `:undefined`；抛错 → `javascript "Uncaught Error: boom"`；
+`Promise.resolve(1)` → `Promise results are not awaited; return a synchronous value`；
+`JSON.stringify({ok:42})` → `"{\"ok\":42}"`。ERT 66/66。
 
-## C. 行为与 UX
-
-### C1 ✅ 延迟标签的命令路径有测试兜底
-`chromel--command` 先在 raw-JS 开关上做判定、再 `chromel--ensure-browser`，最后才要求 `chromel--id`。新增两条 ERT：`chromel-command-materializes-a-deferred-tab-first`（断言调用顺序是 ensure → native，且 native 收到新建的 id）与 `chromel-command-refuses-a-tab-that-stayed-deferred`（仍 pending 时 `user-error`）。
-
-### C2 ✅ 搜索引擎写死 DuckDuckGo
-新增 `defcustom chromel-search-url`（默认 `https://duckduckgo.com/?q=%s`，要求含 `%s`），`chromel--normalize-url` 用 `format` 套用，查询串仍走 `url-hexify-string`。ERT 增加 3 条：默认模板、`%` 转义（`100%25`）、自定义模板生效；29/29 通过。
-> 顺带发现：仓库里的 `chromel.elc` 是未跟踪的构建产物，`load` 会优先加载它，改完 `chromel.el` 直接跑 ERT 会测到旧逻辑（本轮先踩了一次）。建议后续在测试脚本里强制 `load` 源文件或先删 `.elc`。
-
-### C3 ✅ 弹窗是真弹窗，保留 window.opener
-原实现把 `target=_blank` / `window.open` 变成新标签：URL 对了，但页面拿到的是没有任何关系的顶层页，`window.opener` 为 null，`postMessage` 回不去，OAuth / 支付类流程会卡住。
-
-现在 `OnBeforePopup` 返回 `false`：`preparePopupPage()` 先把 page 登记进 `pages`（`awaitingBrowser = true`，容器 1×1 隐藏挂在 opener 的窗口里），`CefWindowInfo`（hidden + ALLOY）、`CefClient`、`CefBrowserSettings` 交给 CEF，由 CEF 自己创建弹窗；`Client::OnAfterCreated` 负责把 CEF 视图收进 container（这一步**必须**按 client 自己的 `id_` 查 page —— CEF 的 browser id 与 page id 是两套序列，有 DevTools 后就会错开）。随后发 `popup-page` 事件 `{id,url,background}`，Elisp 的 `chromel--adopt-popup` 用**已有** id 建 buffer（绝不调 `chromel--native-create`）。
-
-测试：`test/features.html` 加一个 `target=_blank rel=opener` 的链接与 `test/popup-child.html`，`gui-features` 断言「新 buffer 存在 + URL 正确 + 子页面能读到 `window.opener.document.title`」。踩坑：Chromium 88 起 `target=_blank` 默认 `noopener`，必须显式 `rel=opener`；`popupOpened` 那种 postMessage 断言有竞态，改成子页面直接读 opener 文档。
-
-### C4 ✅ hints 测试按 URL 选标签，不再硬编码按键
-`gui-hints` 原先发 `(unread-command-events '(?a ?a ?s))` 并强制 `chromel-hint-alphabet "as"`，前提是"只有两个可见链接"。可见数量一变（窗口高度、显示器、缩放），标签就变，测试随即超时。
-现在 `chromel-test--follow-link-to` 用 `cl-letf` 替换 `chromel--read-hint`：从 overlay 返回的 hints 里挑 `:url` 以 `/hint-target` 结尾的那条，读它的真实 label（注意返回必须是 `(:label …)` plist，`chromel-follow` 会再拿它去 `prepare`）。
-**验证**：`CHROMEL_TEST_ONLY=smoke,hints` PASS；并在 A2 把窗口放大到 1100×750 后仍然 PASS（旧写法在这一步必挂）。
-
-### C5 ✅ 泵的空闲判定改问 native
-`chromel_core.h` 新增 `int browser_count();`（只读 `browsers` + `settingsBrowsers`，**不**经 `requireReady`，CEF 未初始化时返回 0）；模块导出 `chromel--native-browser-count`；Elisp 新增 `chromel--native-has-browsers-p`，`chromel--pump-needed-p` 用它取代原先永不重置的 `chromel--settings-open`（该变量已删除）。`chromel-settings` 改为「先发 settings 命令、再 `chromel--ensure-timer`」，因为窗口是在那条命令里同步创建的。API 版本随之升到 2。ERT 新增 2 条并更新 2 条（无页面/无浏览器时停泵、设置窗口存在时继续泵、模块未加载时不问 native）。
-
-### C10 ✅ 没有广告/追踪拦截
-
-Chromel 自带一份 uBOL 九套 ruleset 的编译快照（`data/blocklist.txt`，110,616 条域名规则），默认开启。`native/blocklist.mm` 在 IO 线程匹配 host 与发起站点，`Client::GetResourceRequestHandler` 返回 `RV_CANCEL`；`allow` 优先，`i=<suffix>` 限定发起站点，按站点例外存 `blocker.json`。测量：`--blocklist-bench` 20,000 次平均 **0.17 µs**/请求（门槛 20 µs）。
-
-元素隐藏（同一快照）：`data/cosmetics.txt` 有 21,164 个站点的规则（1.9 MB），`native/cosmetics.mm` 在 `Client::OnLoadEnd` 对**每个框架**注入 `<style>`，按宿主后缀逐级匹配、`~n` 例外在生成期已扣除。选择器用 `;` 分组、一条一个 `{display:none!important}` —— CSS 遇到不可解析的选择器会丢掉整条逗号列表，uBOL 的列表里确实有这样的选择器（第一版整块注入时全站失效，被 `gui-cosmetics` 抓到）。
-
-已知不精确：只有域名规则（路径/子串/正则共 24,717 条被丢弃并计数）、忽略 `third-party` 标记（约 8 千条比原版激进）、元素隐藏不支持程序化选择器（`:has-text` 等）与 `lowlyGeneric`、不做内联/脚本注入式隐藏。
-
-### C9 ✅ 没有代理配置
-
-CEF 的代理只认命令行：`--proxy-server` 或 `--proxy-pac-url`，都在浏览器进程启动时读一次。以前 Chromel 两者都没接，所以无论用户环境怎么配，页面永远直连。
-
-现在 `chromel-proxy-pac-file` 接受 PAC 文件或 URL：native 在 `OnBeforeCommandLineProcessing` 追加 `proxy-pac-url`，Elisp 在 `chromel--start` 里先把它交过去。实测这个构建**取不到 `file://` 的 PAC**（静默退回直连），所以文件路径由 `chromel--pac-server-url` 在 `127.0.0.1` 起一个只回答 `/proxy.pac` 的 HTTP 服务喂给 Chromium；`http(s)://` 地址原样使用。
-
-`scripts/smartproxy-to-pac.py` 把 SmartProxy 的完整备份转成 PAC：按 `activeProfileId` 选 profile，保留规则顺序，`whiteList` → DIRECT，协议映射 `PROXY/HTTPS/SOCKS4/SOCKS5`，未匹配主机默认 DIRECT（`--default-proxy` 可改）。针对用户实际导出的 44 条规则生成成功，46 行返回值；用本机 clash（`SOCKS5 127.0.0.1:7890`）实测：未匹配的 `example.org` 直连加载，命中的 `mikanani.me` 经代理加载出真实标题。
-
-**验证**：`--proxy-server=127.0.0.1:9` 让两个站点都失败（证明命令行代理生效）；`file://` 与 `data:` 的 PAC 都静默退回直连；`http://127.0.0.1:<port>/proxy.pac` 的 PAC 生效；ERT 44/44（含 `chromel--pac-url` 起服务并回读脚本的用例）。
-
-### C8 ✅ 权限请求无声拒绝
-
-`Client` 之前没实现 `CefPermissionHandler`，于是通知、地理位置、摄像头/麦克风、剪贴板读取在 Alloy 风格下落到默认处理 = `CEF_PERMISSION_RESULT_IGNORE`，网页只会看到"用户拒绝"，用户什么也没看到。
-
-现在 `native/permissions.mm` 停靠回调并上报 `permission` 事件，Elisp 在回显区问 `Allow <origin> to use <name>? (y or n)`，答案按「来源 + 权限名」记在本次会话的 `chromel--permission-answers` 里；`chromel-permission-policy` 可预置 `allow`/`deny`。策略拒绝会拒绝整条请求（一个回调只有一个答案），媒体请求按 `mediaBits` 原样回传。
-
-验证：`test/gui-permission.el` 打开一个调 `Notification.requestPermission()` 的页面，断言"问了一次 → granted"、"第二次同来源不再问 → granted"。顺手确认了 `y-or-n-p` 在定时器回调里可用（CEF 泵在等待期间停摆无害，渲染进程本来就在等这个回调）。
-
-### C7 ✅ 下载被静默丢弃
-
-`CefDownloadHandler` 之前根本没实现，附件导航在 Alloy 下退回默认处理 = 取消，页面看起来"点了没反应"。现在 `native/downloads.mm` 决定路径（`chromel-download-directory`，默认 `~/Downloads`）、按 `name (1).ext` 避让重名、按 percent 去重上报进度；Elisp 在模式行显示百分比、在回显区报告结果。`test/gui-download.el` 覆盖"下载落地 + 内容正确 + 同名不覆盖"。
-
-顺带记两个浏览器的脾气：① 同一页面第二次脚本触发的下载会被"多重自动下载"拦掉，需要真实点击（测试里第二份来自新标签页 + 点击）；② 刚交付过下载的页面不再执行脚本或导航，所以复用它做后续断言会看到"没有任何事件"。
-
-### C6 ✅ 渲染进程崩溃后只剩空白页
-渲染进程死掉时（内存耗尽、SIGSEGV、`kill -9`），Elisp 侧原先只能看到"不再有新事件"，页面冻结在白屏，用户没有任何提示。
-现在 `Client::OnRenderProcessTerminated` 上报 `crashed`（`{status, code, message}`），Elisp 记住崩溃前的 URL、清掉 find 状态，并把标签导航到一个 `data:text/html` 错误页（"The page crashed / Renderer exited (status 9, code 0) / Press r to reload …"）；`r`（`chromel-reload`）在有崩溃标记时导航回原 URL 并清标记，`mode-line-process` 期间固定显示 `Crashed`。
-`chrome://crash` 是 Chrome 层 URL，CEF 不提供（实测导航后无任何事件、URL 为空），所以回归手段是**自己杀渲染进程**：`test/gui-crash.el` 用 `ps` 找 `--type=renderer` 子进程并 `kill -9`，再断言出现错误页、`r` 能恢复。历史记录本来只收 `https?://`，`data:` 页不会污染它。
-**验证**：ERT 37/37（新增事件路径与 `chromel--crash-reason` 两条）；`CHROMEL_TEST_ONLY=crash` PASS；完整套件 21/21。
-
-## D. 文档
-
-- ✅ `docs/architecture.md`：分层、外部消息泵、视图嵌入与坐标系、事件/命令、JS 往返、键盘双路径、焦点、生命周期、不变量、扩展点（README 顶部已链入）。
-- README 明确：CEF 必须在 app bundle 内（`install-app.py` 的理由）、`C-c w E` 与 `s` 的分工、`chromel-allow-raw-javascript` 的取舍、session/history 文件位置与恢复命令。
-- ✅ `CHANGELOG.md`：0.1.0 起按"崩溃与安全 / 交互 / 测试与构建 / 文档"分类。
-- ✅ README 已补：CEF 为何必须在 app bundle 内、`chromel-allow-raw-javascript` 的取舍。
-
-## 常用验证
-
-```bash
-./scripts/build.sh                       # 0 warning
-emacs --batch -L . -L test -l test/chromel-test.el -f ert-run-tests-batch-and-exit
-python3 scripts/test-gui.py              # 24 项，约 5 分钟，会抢焦点
-CHROMEL_TEST_ONLY=smoke,hints python3 scripts/test-gui.py   # 子集
-```
-
-## 已知外部问题（不是本项目的 bug）
-
-- **删除已被输入法接管的 frame 会让 Emacs 31.1 abort**：`make-frame` → 等待（哪怕 1 秒）→ `delete-frame`，崩溃于 `-[EmacsView selectedRange]`（经 `handleTSMEvent` 从 IMK 进入），随后 `emacs_abort`。`emacs -Q`、不加载 chromel、不启动 CEF 也能复现（5/5），属于 Emacs/macOS 交互缺陷。项目侧规避：`test/gui-smoke.el` 用 `make-frame-invisible` 代替 `delete-frame`（提交 `136f5e3`）。若将来要覆盖"删除 frame"的清理路径，需要先确认上游修好。
-- **GitHub macOS runner 不可用**：`macos-14` 报 `The configuration 'macos-14-arm64-us-default' is not supported`；`macos-13` 被接受但长期 queued 直到 24 小时被取消。CI 的 `elisp` 作业可改 `ubuntu-latest`，`native` 作业保留手动触发。

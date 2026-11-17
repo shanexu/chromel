@@ -281,6 +281,25 @@ Allow https://example.org/ to use location? (y or n)
 
 答案只活在这次 Emacs 会话里：Chromel 不写自己的权限数据库，重启后同一来源会重新询问（除非 Chromium 自己缓存了该决定）。摄像头/麦克风真正要拿到设备流还需要 `--enable-media-stream` 之类的开关，权限放行只是不再被静默拒绝。
 
+## 执行页面脚本
+
+需要从 Emacs 读页面里的东西时，用 `chromel-execute-script`（异步、不阻塞输入、不需要 CDP 端口）：
+
+```elisp
+(chromel-execute-script
+ (current-buffer)                       ; 或 nil 表示当前 buffer
+ "({title: document.title, links: document.querySelectorAll('a').length})"
+ (lambda (value) (message "值：%S" value))
+ :on-error (lambda (failure) (message "失败：%S" failure))
+ :timeout 5)
+```
+
+- 结果按 JSON 规则转换：对象 → alist（symbol 键），数组 → vector，`false` → `:false`，`null` → `:null`，`undefined` → `:undefined`
+- 失败回调收到 `(:type TYPE :message TEXT)`，`TYPE` 是 `javascript`、`result`、`timeout`、`navigation`、`closed`、`cancelled`、`transport` 之一
+- 可以同时发多个请求；返回的 token 交给 `chromel-cancel-script` 放弃它们（不会中断已在运行的 JS，也不回滚副作用）
+- 只评估一次：值是序列化后的结果，不是把源码再跑一遍；Promise 不会被 await（直接报错），循环引用等不可序列化的结果同样报错
+- 回调经 Emacs 定时器在页面 buffer 里执行，回调自身的错误只打消息，不会让浏览器停摆
+
 ## 调试与自动化（CDP）
 
 需要 Playwright、`chrome-remote-interface` 或 DevTools 前端接管页面时，给 Chromel 开一个本地 CDP 端口：
