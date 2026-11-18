@@ -18,7 +18,7 @@
 
 ### 交互
 
-- `gi`（`C-u N gi`）聚焦页面上第一个 / 第 N 个文本框，包含同源 iframe；`Tab` 继续在页面内切换焦点。
+- `gi`（`C-u N gi`）聚焦页面上第一个 / 第 N 个文本框，包含同源 iframe，光标落在字段末尾（与 Vimium-C 一致）；`Tab` 继续在页面内切换焦点。
 - 新增 `chromel-focus-on-open`：设为 nil 后打开网页只选中窗口、不把键盘交给页面。
 - 页面里的标准编辑快捷键现在真的可用：页面持焦时 `⌘V`、`⌘C`、`⌘X`、`⌘A`、`⌘Z`（以及 `⌘⇧Z`）分别映射到粘贴、复制、剪切、全选、撤销、重做。此前这些键被转发进 Emacs，Chromium 永远收不到编辑命令，剪贴板里的内容粘不进输入框。
 - 代理可用 PAC 配置：`chromel-proxy-pac-file` 指向 PAC 文件或 URL（`--proxy-pac-url`）。Chromium 只在启动时读一次，改完要重启 Emacs；`file://` PAC 在这个构建里取不到，所以文件路径由 Chromel 在 `127.0.0.1` 上临时提供一个只读 HTTP 服务。`scripts/smartproxy-to-pac.py` 可以把 SmartProxy 备份转成 PAC，并用 `--fetch-proxy` 展开 gfwlist 之类的订阅。

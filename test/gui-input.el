@@ -11,10 +11,39 @@
   }
   return JSON.stringify(active ? (active.id || active.tagName) : '');
 })()")
+(defconst chromel-test--caret-script
+  "(function () {
+  let active = document.activeElement;
+  let doc = document;
+  while (active && active.tagName === 'IFRAME') {
+    try { doc = active.contentDocument; active = doc.activeElement; } catch (error) { break; }
+  }
+  if (!active) return JSON.stringify({tag: 'none'});
+  if (typeof active.value === 'string' && typeof active.selectionStart === 'number') {
+    return JSON.stringify({tag: active.id, start: active.selectionStart, end: active.selectionEnd,
+                           len: active.value.length});
+  }
+  const selection = doc.getSelection ? doc.getSelection() : window.getSelection();
+  // An editable element reports an element-level offset (child index), so
+  // compare against the end of the contents instead of a text length.
+  let atEnd = false;
+  if (selection && selection.isCollapsed) {
+    const probe = doc.createRange();
+    probe.selectNodeContents(active);
+    probe.setStart(selection.anchorNode, selection.anchorOffset);
+    atEnd = probe.collapsed;
+  }
+  return JSON.stringify({tag: active.id, atEnd: atEnd,
+                         offset: selection ? selection.anchorOffset : null,
+                         len: active.textContent ? active.textContent.length : null});
+})()")
 (defun chromel-test--assert (value text) (unless value (error "%s" text)))
 (defun chromel-test--finish (ok text)
-  (with-temp-file (getenv "CHROMEL_TEST_RESULT") (insert (if ok "PASS: " "FAIL: ") text "\n"))
-  (kill-emacs (if ok 0 1)))
+  (let ((path (getenv "CHROMEL_TEST_RESULT")))
+    (when path
+      (with-temp-file path (insert (if ok "PASS: " "FAIL: ") text "\n")))
+    (princ (concat (if ok "PASS: " "FAIL: ") text "\n") #'external-debugging-output)
+    (kill-emacs (if ok 0 1))))
 (defun chromel-test--until (predicate text seconds)
   (let ((deadline (+ (float-time) seconds)) done)
     (while (and (not done) (< (float-time) deadline))
@@ -33,12 +62,26 @@
     (and (buffer-live-p chromel-test--buffer)
          (with-current-buffer chromel-test--buffer
            (equal (ignore-errors (chromel--eval chromel-test--active-script)) expected)))))
+(defun chromel-test--caret ()
+  (with-current-buffer chromel-test--buffer
+    ;; `chromel--eval' already parses the JSON string the script returns.
+    (chromel--eval chromel-test--caret-script)))
 (defun chromel-test--focus (count expected)
   (with-current-buffer chromel-test--buffer
     (chromel-focus-input count))
   (chromel-test--until (chromel-test--active-p expected)
                        (format "gi %d did not focus %s" (or count 1) expected)
-                       10))
+                       10)
+  ;; Vimium-C puts the caret at the end of the field; so must we.
+  (let* ((caret (chromel-test--caret))
+         (len (plist-get caret :len)))
+    (if (plist-member caret :start)
+        (chromel-test--assert (and (= (plist-get caret :start) len) (= (plist-get caret :end) len))
+                              (format "gi %s left the caret at %S, not the end (%s)"
+                                      expected caret len))
+      (chromel-test--assert (eq t (plist-get caret :atEnd))
+                            (format "gi %s left the caret at %S, not the end (%s)"
+                                    expected caret len)))))
 (defun chromel-test--run ()
   (condition-case error
       (let ((chromel-focus-on-open nil))

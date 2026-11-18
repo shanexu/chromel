@@ -2,7 +2,7 @@
 
 快照：2026-11-15，分支 `topic/blocker`（基于 `master` `a447651`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 69/69（另加 `python3 test/test_blocklist_converter.py` 3 条与 `python3 test/test_cosmetics_converter.py` 9 条），`python3 scripts/test-gui.py` 29 个 PASS、rc=0。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 69/69（另加 `python3 test/test_blocklist_converter.py` 3 条与 `python3 test/test_cosmetics_converter.py` 9 条），`python3 scripts/test-gui.py` 30 个 PASS、rc=0。
 
 ## 已完成（本轮）
 

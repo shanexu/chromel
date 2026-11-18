@@ -1365,6 +1365,16 @@ DETAIL is the backend's JSON; it is shown verbatim only after escaping."
   if (all.length < index) return JSON.stringify({found: false, total: all.length});
   const target = all[index - 1];
   target.focus({preventScroll: true});
+  // Vimium-C leaves the caret at the end of the field, not at its start.
+  if (typeof target.setSelectionRange === 'function' && typeof target.value === 'string') {
+    try { target.setSelectionRange(target.value.length, target.value.length); } catch (error) {}
+  } else if (target.isContentEditable) {
+    const range = document.createRange();
+    range.selectNodeContents(target);
+    range.collapse(false);
+    const selection = window.getSelection();
+    if (selection) { selection.removeAllRanges(); selection.addRange(range); }
+  }
   target.scrollIntoView({block: 'center', inline: 'nearest'});
   return JSON.stringify({found: true, index: index, total: all.length,
                          tag: target.tagName.toLowerCase(), type: (target.type || '').toLowerCase()});
