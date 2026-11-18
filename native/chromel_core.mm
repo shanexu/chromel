@@ -469,6 +469,8 @@ class Client final : public CefClient,
         [view removeFromSuperview];
         [page->container addSubview:view];
         view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+        view.frame = page->container.bounds;
+        browser->GetHost()->WasResized();
       }
     }
   }

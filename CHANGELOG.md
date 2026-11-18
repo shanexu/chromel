@@ -6,6 +6,7 @@
 
 ### 崩溃与安全
 
+- 页面视口现在会跟着 Emacs 窗口变化：`layout()` 补上了 `CefBrowserHost::WasResized()`（此前只调 `NotifyMoveOrResizeStarted()`，渲染进程收不到新尺寸，`innerWidth` 永远是首次布局的值）；新建标签与弹窗收养时也会先对齐视图尺寸再通知 CEF。
 - `cef.lock.json` 入库：干净 clone 首次构建不再因缺少锁文件直接失败。
 - Objective-C 异常不再越过模块边界（`@catch (NSException*)`），nil 视图、已销毁窗口等 Cocoa 故障转为 Lisp `error`。
 - `GetMainFrame()` 统一走 `mainFrame()` 守卫；JS 求值只接受主帧回复且 token 必须匹配。

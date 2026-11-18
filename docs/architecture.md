@@ -142,7 +142,8 @@ container.frame = NSMakeRect(x, cy, width, height);
 ```
 
 - Cocoa 默认原点在左下、AppKit 视图通常 flipped；Emacs 的坐标系是左上。`isFlipped` 分支负责这一层换算；
-- 尺寸变化后调用 `NotifyMoveOrResizeStarted()`，否则 CEF 内部的合成器仍按旧尺寸绘制；
+- 尺寸变化后先 `NotifyMoveOrResizeStarted()`（窗口正在移动/缩放，影响弹层与拖拽），再调 `WasResized()` —— 后者才是"把新视口尺寸提交给渲染进程"的那一步。直接给平台视图赋 `frame` 不会触发 CEF 自己的 resize 路径，漏掉 `WasResized()` 时页面会一直停在旧的 `innerWidth`；
+- `create()` 与弹窗收养（`OnAfterCreated`）也会把视图 `frame` 对齐到容器并调一次 `WasResized()`，否则"窗口还没定宽时创建的标签"会停在 1×1 占位尺寸；
 - 几何没变时 Elisp 侧会跳过调用（`chromel--sent-geometry` 去重）。
 
 ### 4.3 窗口识别：临时改标题
@@ -454,7 +455,7 @@ Emacs.app/Contents/
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
 
-GUI 套件共 27 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、Ctrl 前缀、崩溃、下载、权限、代理、内容拦截、元素隐藏与剪贴板等；`python3 scripts/test-gui.py` 最后一次完整运行为 30 个 PASS（含原生冒烟，以及 `gui-smoke` 的播种与恢复两次运行）。
+GUI 套件共 28 个脚本，覆盖渲染、几何、焦点、滚动、会话、设置窗口、hints、Escape、Ctrl 前缀、崩溃、下载、权限、代理、内容拦截、元素隐藏与剪贴板等；`python3 scripts/test-gui.py` 最后一次完整运行为 32 个 PASS（含原生冒烟，以及 `gui-smoke` 的播种与恢复两次运行）。
 
 `CHROMEL_TEST_ONLY=a.el,b.el` 可只跑子集（原生冒烟总会先跑）。但 fixture 的标题在同一个 profile 里第一次是 `…-ready`、之后才是 `…-restored`，所以过滤掉"播种"的那一条会让 `…-restored` 永远等不到标题。`test-gui.py` 检测到筛选后的第一条不是播种测试时，会自动在前面补一条 `gui-smoke.el`。
 
