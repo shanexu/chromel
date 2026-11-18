@@ -119,6 +119,11 @@ Notification.requestPermission().then(function (result) {
                     "onload=\"document.title='ad-loaded'\" "
                     "onerror=\"document.title='ad-blocked'\">").encode()
             content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/resize'):
+            # No scrollbars, so innerWidth must equal the view width exactly.
+            body = (b"<!doctype html><meta charset=utf-8><title>resize-fixture</title>"
+                    b"<body style=\"margin:0\"><main style=\"height:100vh;background:#eef\"></main>")
+            content_type = "text/html; charset=utf-8"
         elif self.path.startswith('/inputs-frame'):
             body = (b"<!doctype html><meta charset=utf-8><title>inputs-child</title>"
                     b"<input id=\"fourth\" value=\"fourth\">")
@@ -232,6 +237,7 @@ try:
             ("blocker-fixture", "gui-blocker.el"),
             ("cosmetic:true:true:true", "gui-cosmetics.el"),
             ("inputs-fixture", "gui-input.el"),
+            ("resize-fixture", "gui-resize.el"),
             ("chromel-emacs-restored", "gui-keys.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
@@ -249,7 +255,7 @@ try:
                 """Run one GUI script; returns (status, log text, result text)."""
                 route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
                          'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html',
-                         'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker', 'gui-cosmetics.el': '/cosmetic', 'gui-input.el': '/inputs'}.get(script, '/fixture')
+                         'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker', 'gui-cosmetics.el': '/cosmetic', 'gui-input.el': '/inputs', 'gui-resize.el': '/resize'}.get(script, '/fixture')
                 test_url = url.replace('/fixture', route)
                 result = pathlib.Path(temp) / "result"
                 result.unlink(missing_ok=True)

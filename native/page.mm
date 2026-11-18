@@ -146,6 +146,11 @@ int create(long handle, const std::string& url) {
   [view removeFromSuperview];
   [page->container addSubview:view];
   view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
+  // CEF sizes the view itself at creation; adopt the container's size before
+  // the first paint, or a page opened while its window was still narrow stays
+  // at the placeholder width.  WasResized is what tells the renderer.
+  view.frame = page->container.bounds;
+  page->browser->GetHost()->WasResized();
   return page->id;
 }
 
@@ -169,6 +174,10 @@ void layout(int id, long handle, double x, double y, double width, double height
     if (view) {
       view.frame = page->container.bounds;
       page->browser->GetHost()->NotifyMoveOrResizeStarted();
+      // Assigning the frame alone does not reach the renderer: layout() touches
+      // the platform view directly, so CEF has to be told to recompute the
+      // viewport.  Without this the page keeps its old innerWidth forever.
+      page->browser->GetHost()->WasResized();
     }
   }
   page->container.hidden = width <= 0 || height <= 0;
