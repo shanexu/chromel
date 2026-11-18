@@ -1,10 +1,10 @@
 {
-  "version": "156.0.15+gcf671c0+chromium-156.0.8078.80",
+  "version": "156.0.30+g6028375+chromium-156.0.8078.96",
   "base_url": "https://cef-builds.spotifycdn.com/",
   "macosarm64": {
-    "sha1": "bcdd1877edb300b0fb91d8f71c0b14aae256cd0f"
+    "sha1": "6393d8a838d3b29f6b6939b970b5931dde2082aa"
   },
   "macosx64": {
-    "sha1": "13756e3029307720fe00898d54aef8a64c9b4043"
+    "sha1": "d66ae063959536c86637c63560797713937f5116"
   }
 }

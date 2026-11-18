@@ -500,7 +500,7 @@ GUI 套件共 26 个脚本，覆盖渲染、几何、焦点、滚动、会话、
 
 `chromel-remote-debugging-port` 只做一件事：`initialize()` 把它写进
 `CefSettings.remote_debugging_port`。Chromium 因此在 `127.0.0.1:<port>` 上开
-DevTools 端点，`/json/version` 报 `Chrome/156.0.8078.80`，`/json/list` 列出本进程
+DevTools 端点，`/json/version` 报 `Chrome/156.0.8078.96`，`/json/list` 列出本进程
 已有的页面——外部工具（Playwright、CDP 客户端）可以接管这些页面，用的就是 Chromel
 自己创建的浏览器，不需要再起一个 Chromium。
 
