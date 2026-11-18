@@ -2,7 +2,7 @@
 
 快照：2026-11-15，分支 `topic/blocker`（基于 `master` `a447651`）。
 
-验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 67/67（另加 `python3 test/test_blocklist_converter.py` 3 条与 `python3 test/test_cosmetics_converter.py` 9 条），`python3 scripts/test-gui.py` 28 个 PASS、rc=0。
+验证基线：`./scripts/build.sh` 0 warning / 0 error，ERT 69/69（另加 `python3 test/test_blocklist_converter.py` 3 条与 `python3 test/test_cosmetics_converter.py` 9 条），`python3 scripts/test-gui.py` 29 个 PASS、rc=0。
 
 ## 已完成（本轮）
 
@@ -153,7 +153,7 @@ NS 端口下 `window-id` 是 Emacs 内部编号（字符串），`outer-window-i
 实测（`build/EmacsChromel.app` + 临时 profile）：`({a:1,b:[true,null,'x']})` →
 `((a . 1) (b . [t :null "x"]))`；`undefined` → `:undefined`；抛错 → `javascript "Uncaught Error: boom"`；
 `Promise.resolve(1)` → `Promise results are not awaited; return a synchronous value`；
-`JSON.stringify({ok:42})` → `"{\"ok\":42}"`。ERT 66/66。
+`JSON.stringify({ok:42})` → `"{\"ok\":42}"`。ERT 66/66；本次改动后全量为 69/69。
 
 ## C. 行为与 UX
 

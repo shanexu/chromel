@@ -108,6 +108,7 @@ EMACS_INCLUDE_DIR=/path/to/emacs/include ./scripts/build.sh
 | `gF` | 返回最外层页面，随后滚动外页 |
 | `C-c C-p` / `C-u C-c C-p` | 返回上一层 / 最外层页面 |
 | `f` / `C-c C-j` | 显示交互元素标签，点击链接、按钮或聚焦输入框 |
+| `gi` / `C-u N gi` | 聚焦页面上第一个 / 第 N 个文本框（含同源 iframe），随后 `Tab` 依次跳到下一个 |
 | `F` | 提示选择后在后台打开链接；其他控件仍在当前页操作 |
 | `C-u C-c C-j` / `M-x chromel-follow-new-buffer` | 提示选择后在前台打开链接 |
 | `p` / `P` | 把最新复制的文本作为地址或搜索词，在当前 / 新页面打开 |

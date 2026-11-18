@@ -615,6 +615,7 @@ every manual tick and multiply the timer storm."
                  ("gT" . chromel-previous-tab) ("gt" . chromel-next-tab)
                  ("T" . chromel-switch-tab) ("^" . chromel-last-tab)
                  ("gF" . chromel-focus-main-frame)
+                 ("gi" . chromel-focus-input)
                  ("i" . chromel-focus) ("RET" . chromel-focus) ("q" . quit-window)
                  ("M-<" . chromel-scroll-to-top) ("M->" . chromel-scroll-to-bottom)
                  ("M-<right>" . chromel-forward)
@@ -1329,6 +1330,63 @@ DETAIL is the backend's JSON; it is shown verbatim only after escaping."
 (defun chromel-forward () "Go forward." (interactive) (chromel--command "forward"))
 (defun chromel-stop () "Stop loading." (interactive) (chromel--command "stop"))
 (defun chromel-focus () "Send keyboard focus to the page." (interactive) (chromel--command "focus"))
+
+(defconst chromel--input-script
+  "(function () {
+  const selector = 'input, textarea, [contenteditable=\"\"], [contenteditable=\"true\"], [contenteditable=\"plaintext-only\"]';
+  const skip = ['hidden', 'checkbox', 'radio', 'file', 'submit', 'button', 'reset', 'image', 'range', 'color'];
+  const visible = (el) => {
+    if (!el.isConnected || el.disabled) return false;
+    const style = window.getComputedStyle(el);
+    if (style.visibility === 'hidden' || style.display === 'none') return false;
+    const rect = el.getBoundingClientRect();
+    return rect.width > 0 && rect.height > 0;
+  };
+  const editable = (el) => {
+    const tag = el.tagName;
+    if (tag === 'TEXTAREA') return true;
+    if (tag === 'INPUT') return skip.indexOf((el.type || 'text').toLowerCase()) === -1;
+    return el.isContentEditable === true;
+  };
+  const all = [];
+  const walk = (doc) => {
+    for (const el of doc.querySelectorAll(selector)) {
+      if (editable(el) && visible(el)) all.push(el);
+    }
+    for (const frame of doc.querySelectorAll('iframe, frame')) {
+      try {
+        const inner = frame.contentDocument;
+        if (inner) walk(inner);
+      } catch (error) {}
+    }
+  };
+  walk(document);
+  const index = %d;
+  if (all.length < index) return JSON.stringify({found: false, total: all.length});
+  const target = all[index - 1];
+  target.focus({preventScroll: true});
+  target.scrollIntoView({block: 'center', inline: 'nearest'});
+  return JSON.stringify({found: true, index: index, total: all.length,
+                         tag: target.tagName.toLowerCase(), type: (target.type || '').toLowerCase()});
+})()"
+  "JavaScript that focuses the Nth visible text field, counting frames.")
+
+(defun chromel-focus-input (&optional count)
+  "Focus the COUNT-th visible text field on the page and hand it the keyboard.
+Text boxes, textareas and editable regions inside same-origin frames are
+counted in document order; `Tab' then walks to the following fields."
+  (interactive "p")
+  (let* ((index (max 1 (or count 1)))
+         (result (chromel--eval (format chromel--input-script index))))
+    (unless (eq t (plist-get result :found))
+      (user-error "No text input on this page"))
+    (chromel-focus)
+    (message "Chromel: input %d of %d (%s)"
+             (plist-get result :index) (plist-get result :total)
+             (let ((tag (plist-get result :tag))
+                   (type (plist-get result :type)))
+               (if (and type (not (equal type ""))) (format "%s[%s]" tag type) tag)))))
+
 (defun chromel-devtools () "Open Chromium developer tools." (interactive) (chromel--command "devtools"))
 
 (defun chromel-focus-parent-frame (&optional root)

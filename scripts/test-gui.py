@@ -119,6 +119,21 @@ Notification.requestPermission().then(function (result) {
                     "onload=\"document.title='ad-loaded'\" "
                     "onerror=\"document.title='ad-blocked'\">").encode()
             content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/inputs-frame'):
+            body = (b"<!doctype html><meta charset=utf-8><title>inputs-child</title>"
+                    b"<input id=\"fourth\" value=\"fourth\">")
+            content_type = "text/html; charset=utf-8"
+        elif self.path.startswith('/inputs'):
+            # Hidden and non-text inputs must not be counted; the iframe is
+            # same-origin so the field walk should reach it.
+            body = (b"<!doctype html><meta charset=utf-8><title>inputs-fixture</title>"
+                    b"<input type=\"hidden\" id=\"hidden\" value=\"x\">"
+                    b"<input type=\"checkbox\" id=\"check\">"
+                    b"<input id=\"first\" value=\"first\">"
+                    b"<textarea id=\"second\">second</textarea>"
+                    b"<div id=\"third\" contenteditable=\"true\" style=\"height:40px\">third</div>"
+                    b"<iframe id=\"frame\" src=\"/inputs-frame\" style=\"height:80px;width:300px\"></iframe>")
+            content_type = "text/html; charset=utf-8"
         elif self.path.startswith('/cosmetic-frame'):
             body = (b"<!doctype html><title>cosmetic-child</title>"
                     b"<div id=\"banner\" style=\"height:60px\">child banner</div>")
@@ -216,6 +231,7 @@ try:
             ("paste-fixture", "gui-paste.el"),
             ("blocker-fixture", "gui-blocker.el"),
             ("cosmetic:true:true:true", "gui-cosmetics.el"),
+            ("inputs-fixture", "gui-input.el"),
             ("chromel-emacs-restored", "gui-keys.el"),
         ]
         only = [part for part in os.environ.get("CHROMEL_TEST_ONLY", "").split(",") if part]
@@ -233,7 +249,7 @@ try:
                 """Run one GUI script; returns (status, log text, result text)."""
                 route = {'gui-passwords.el': '/passwords', 'gui-features.el': '/features', 'gui-controls.el': '/controls', 'gui-scroll.el': '/scroll', 'gui-hold.el': '/scroll',
                          'gui-scroll-modal.el': '/scroll-modal', 'gui-crash.el': '/crash.html',
-                         'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker', 'gui-cosmetics.el': '/cosmetic'}.get(script, '/fixture')
+                         'gui-paste.el': '/paste', 'gui-blocker.el': '/blocker', 'gui-cosmetics.el': '/cosmetic', 'gui-input.el': '/inputs'}.get(script, '/fixture')
                 test_url = url.replace('/fixture', route)
                 result = pathlib.Path(temp) / "result"
                 result.unlink(missing_ok=True)
