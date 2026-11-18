@@ -50,6 +50,8 @@
 
 ### 测试与构建
 
+- CEF 升级到 `156.0.30`（Chromium `156.0.8078.96`），只改 `cef.lock.json`；同大版本补丁级升级，接口未变，`./scripts/build.sh` 零警告、ERT 67/67、GUI 28 项全过。
+
 - 新增 `test/gui-keys.el`：页面持焦时 `C-x`、`C-c`、`C-h` 前缀仍完整到达 Emacs；`test-key` 测试钩子因此支持 `ctrl-<字母>`（只存在于测试模式）。
 
 
