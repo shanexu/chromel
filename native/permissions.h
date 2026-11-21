@@ -23,15 +23,16 @@ uint64_t begin_prompt(int browserId,
                       const std::vector<std::string>& names,
                       CefRefPtr<CefPermissionPromptCallback> prompt,
                       CefRefPtr<CefMediaAccessCallback> media,
-                      uint32_t mediaBits);
+                      uint32_t mediaBits,
+                      uint64_t cefPromptId);
 
 // Answer a parked request. Unknown ids are ignored: Emacs may answer after a
 // navigation already cancelled the prompt.
 void permission_reply(uint64_t id, bool allow);
 
 // Chromium withdrew the prompt (navigation, closed page); the callback is no
-// longer ours to run.
-void dismiss_prompt(uint64_t id);
+// longer ours to run.  Takes CEF's prompt id, not the id we hand to Emacs.
+void dismiss_prompt(uint64_t cefPromptId);
 
 // Answer every parked request with "no" before tearing CEF down.
 void cancel_prompts();

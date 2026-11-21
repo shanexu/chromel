@@ -181,7 +181,12 @@ void openSettings(const std::string& requested) {
     CefWindow::CreateTopLevelWindow(new SettingsWindowDelegate(view));
     settingsBrowser = view->GetBrowser();
     if (!settingsBrowser || !settingsWindow) {
+      // Close whatever was born, or the leftover browser keeps the whole
+      // registry non-empty and the next call dereferences a null window.
       if (settingsWindow) settingsWindow->Close();
+      if (settingsBrowser) settingsBrowser->GetHost()->CloseBrowser(true);
+      settingsWindow = nullptr;
+      settingsBrowser = nullptr;
       throw std::runtime_error("Could not create the Chrome settings window");
     }
   } else if (!requested.empty()) {

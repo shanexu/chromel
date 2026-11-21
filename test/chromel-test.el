@@ -979,3 +979,50 @@
   (cl-letf (((symbol-function 'chromel--eval)
              (lambda (_) (list :found :false :total 0))))
     (should-error (chromel-focus-input) :type 'user-error)))
+
+(ert-deftest chromel-permission-quit-denies-instead-of-stranding-the-page ()
+  "C-g must still answer the parked native callback before it unwinds."
+  (let ((chromel-permission-policy nil)
+        (replies nil)
+        (quit-seen nil))
+    (clrhash chromel--permission-answers)
+    (cl-letf (((symbol-function 'chromel--permission-ask)
+               (lambda (&rest _) (signal 'quit nil)))
+              ((symbol-function 'chromel--native-permission-reply)
+               (lambda (id decision) (push (cons id decision) replies))))
+      ;; ERT treats an escaping `quit' as its own unwind, so catch it here and
+      ;; assert on both sides of the signal.
+      (condition-case nil
+          (chromel--permission-request
+           (chromel-test--permission-payload 7 "https://example.org" '("notifications")))
+        (quit (setq quit-seen t))))
+    (should quit-seen)
+    (should (equal replies '((7 . "deny"))))
+    (should-not (gethash "https://example.org|notifications" chromel--permission-answers))))
+
+(ert-deftest chromel-blocklist-skips-an-unparsable-type-mask ()
+  "Malformed hex must not be read as zero (which means 'every type')."
+  (skip-unless (chromel-test--module-available-p))
+  (chromel--ensure-module)
+  (let ((file (make-temp-file "chromel-bl" nil ".txt")))
+    (unwind-protect
+        (progn
+          (with-temp-file file
+            (insert "b\tzz\t\th=ads.example.com\n"
+                    "b\t\t\th=ads.example.com\n"
+                    "b\t12g\t\th=ads.example.com\n"
+                    "b\t10000\t\th=ads.example.com\n"))
+          (chromel--native-blocklist-load file)
+          (should-not (chromel--native-blocklist-blocks "http://ads.example.com/a.js" 3 ""))
+          (should-not (chromel--native-blocklist-blocks "http://ads.example.com/a.png" 4 "")))
+      (delete-file file))))
+
+(ert-deftest chromel-ensure-module-does-not-cache-a-version-mismatch ()
+  "A failed API check must leave the module unmarked so the next call retries."
+  (let ((chromel--module-loaded nil))
+    (cl-letf (((symbol-function 'module-load) (lambda (&rest _) t))
+              ((symbol-function 'chromel--apply-download-directory) (lambda () nil))
+              ((symbol-function 'chromel--check-module-api)
+               (lambda () (user-error "Chromel module API 99 does not match elisp 7"))))
+      (should-error (chromel--ensure-module) :type 'user-error)
+      (should-not chromel--module-loaded))))

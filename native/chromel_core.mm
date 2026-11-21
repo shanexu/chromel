@@ -295,7 +295,7 @@ class PermissionHandler final : public CefPermissionHandler {
     if (!callback) return false;
     chromel::begin_prompt(id_, requesting_origin.ToString(),
                           chromel::permission_names(requested_permissions, 0), nullptr,
-                          callback, requested_permissions);
+                          callback, requested_permissions, 0);
     return true;
   }
 
@@ -305,11 +305,10 @@ class PermissionHandler final : public CefPermissionHandler {
                               uint32_t requested_permissions,
                               CefRefPtr<CefPermissionPromptCallback> callback) override {
     (void)browser;
-    (void)prompt_id;
     if (!callback) return false;
     chromel::begin_prompt(id_, requesting_origin.ToString(),
                           chromel::permission_names(0, requested_permissions), callback,
-                          nullptr, 0);
+                          nullptr, 0, prompt_id);
     return true;
   }
 
@@ -471,6 +470,15 @@ class Client final : public CefClient,
         view.autoresizingMask = NSViewWidthSizable | NSViewHeightSizable;
         view.frame = page->container.bounds;
         browser->GetHost()->WasResized();
+      } else {
+        // No window means this popup can never be shown; close it and tell
+        // Emacs to drop the tab it was given instead of leaving a blank page.
+        const int failedId = page->id;
+        browser->GetHost()->CloseBrowser(true);
+        [page->container removeFromSuperview];
+        page->lifetimeWindow = nil;
+        pages.erase(page->id);
+        emit(failedId, @"closed");
       }
     }
   }

@@ -16,6 +16,9 @@ struct Pending {
   CefRefPtr<CefPermissionPromptCallback> prompt;
   CefRefPtr<CefMediaAccessCallback> media;
   uint32_t mediaBits = 0;
+  // CEF's own prompt id, so a dismissal can find this entry.  Zero for
+  // getUserMedia requests, which Chromium never dismisses by id.
+  uint64_t cefPromptId = 0;
 };
 
 std::unordered_map<uint64_t, Pending>& pending() {
@@ -92,7 +95,8 @@ uint64_t begin_prompt(int browserId,
                       const std::vector<std::string>& names,
                       CefRefPtr<CefPermissionPromptCallback> prompt,
                       CefRefPtr<CefMediaAccessCallback> media,
-                      uint32_t mediaBits) {
+                      uint32_t mediaBits,
+                      uint64_t cefPromptId) {
   const uint64_t id = ++lastId;
   Pending entry;
   entry.origin = origin;
@@ -100,6 +104,7 @@ uint64_t begin_prompt(int browserId,
   entry.prompt = prompt;
   entry.media = media;
   entry.mediaBits = mediaBits;
+  entry.cefPromptId = cefPromptId;
   pending()[id] = entry;
 
   NSMutableArray* list = [NSMutableArray arrayWithCapacity:names.size()];
@@ -129,7 +134,15 @@ void permission_reply(uint64_t id, bool allow) {
     entry.prompt->Continue(allow ? CEF_PERMISSION_RESULT_ACCEPT : CEF_PERMISSION_RESULT_DENY);
 }
 
-void dismiss_prompt(uint64_t id) { pending().erase(id); }
+void dismiss_prompt(uint64_t cefPromptId) {
+  if (cefPromptId == 0) return;
+  for (auto item = pending().begin(); item != pending().end(); ++item) {
+    if (item->second.cefPromptId == cefPromptId) {
+      pending().erase(item);
+      return;
+    }
+  }
+}
 
 void cancel_prompts() {
   auto parked = std::move(pending());

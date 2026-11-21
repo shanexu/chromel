@@ -43,19 +43,21 @@ std::string suggestedFileName(const CefString& suggested) {
   return flat;
 }
 
-// "report.txt" -> "report (1).txt", like every other browser.
+// "report.txt" -> "report (1).txt", like every other browser.  Returns an empty
+// string when every candidate name is taken; the caller reports the failure
+// instead of handing Chromium a path that already exists.
 std::string uniquePath(const std::filesystem::path& directory, const std::string& name) {
   std::error_code error;
   const std::filesystem::path target = directory / name;
   if (!std::filesystem::exists(target, error)) return target.string();
   const std::string stem = target.stem().string();
   const std::string extension = target.extension().string();
-  for (int index = 1; index < 1000; ++index) {
+  for (int index = 1; index < 10000; ++index) {
     const std::filesystem::path candidate =
         directory / (stem + " (" + std::to_string(index) + ")" + extension);
     if (!std::filesystem::exists(candidate, error)) return candidate.string();
   }
-  return target.string();
+  return {};
 }
 
 void emitPayload(int browserId, NSDictionary* payload) {
@@ -115,6 +117,14 @@ bool start_download(int browserId,
     }
     path = uniquePath(directoryRef(), name);
     lastPercent().erase(browserId);
+  }
+  if (path.empty()) {
+    emitPayload(browserId, @{
+      @"state" : @"failed",
+      @"name" : value(name),
+      @"reason" : @"Every name derived from this download is already taken.",
+    });
+    return false;
   }
   // show_dialog=false: Emacs has no download shelf, so the path is decided here.
   callback->Continue(path, false);

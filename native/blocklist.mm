@@ -1,6 +1,7 @@
 #include "blocklist.h"
 
 #include <atomic>
+#include <cerrno>
 #include <cstdlib>
 #include <cctype>
 #include <fstream>
@@ -165,7 +166,16 @@ void load_blocklist(const std::string& path) {
     } else {
       continue;
     }
-    rule.types = static_cast<unsigned>(std::strtoul(fields[1].c_str(), nullptr, 16));
+    // Reject text `strtoul` cannot parse: a bare "zz" would silently become
+    // zero, and zero is the legitimate "all resource types" mask here (most
+    // lines use it), so the distinction has to be made on the text.
+    if (fields[1].empty()) continue;
+    char* end = nullptr;
+    errno = 0;
+    const unsigned long mask = std::strtoul(fields[1].c_str(), &end, 16);
+    if (errno != 0 || end != fields[1].c_str() + fields[1].size() || mask > 0xfffu)
+      continue;
+    rule.types = static_cast<unsigned>(mask);
 
     std::istringstream spec(fields[3]);
     std::string token;

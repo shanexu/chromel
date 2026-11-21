@@ -133,9 +133,9 @@ int create(long handle, const std::string& url) {
   // CEF owns its view; the clipping container belongs to this plugin.
   NSView* view = (__bridge NSView*)page->browser->GetHost()->GetWindowHandle();
   if (!view) {
-    // OnAfterCreated already registered this browser; without closing it the
-    // renderer outlives the session and shutdown() can never reach CefShutdown.
-    browsers.erase(page->browser->GetIdentifier());
+    // Close it, but leave the registry alone: `OnBeforeClose` is the only
+    // place allowed to forget a browser, or `shutdown()` can see zero
+    // browsers and call CefShutdown while this one is still alive.
     page->browser->GetHost()->CloseBrowser(true);
     [page->container removeFromSuperview];
     page->lifetimeWindow = nil;

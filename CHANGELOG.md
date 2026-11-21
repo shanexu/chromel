@@ -15,6 +15,8 @@
 - 设置页 URL 判定收敛到 native 单一来源，Elisp 不再维护第二套正则。
 - `--no-sandbox` 未引入；`info()` 不再硬编码 "Sandbox: enabled"，而是报告真实情况。
 - 广告与追踪拦截默认生效：新公开的 `GetResourceRequestHandler` 在 IO 线程上用内置域名表（`data/blocklist.txt`，uBOL 九套 ruleset 编译，110,616 条）取消请求，`allow` 规则优先；`chromel-blocklist-file` 可换名单，`M-x chromel-blocker-toggle-site`（`C-u` 升父域）按站点关掉并记住。第一版只匹配域名，路径/正则类规则不生效（文件头 `dropped(pattern)` 记录条数），`third-party` 标记未参与判断。
+- 权限提示在被 Chromium 撤消、或在 `y-or-n-p` 里按 `C-g` 中断时，都不再留下悬挂的原生回调；畸形类型掩码的名单行会被跳过而不是当作"全部类型"。
+- 权限提示在被 Chromium 撤消、或在 `y-or-n-p` 里按 `C-g` 中断时，都不再留下悬挂的原生回调；畸形类型掩码的名单行会被跳过，而不是当作"全部类型"。
 - 渲染进程崩溃时不再留下白屏：`Client::OnRenderProcessTerminated` 上报 `crashed`，标签切到 `data:text/html` 错误页（含 `status`/`code`/原因），`r` 回到崩溃前的 URL，`mode-line` 期间显示 `Crashed`。
 
 ### 交互
