@@ -806,9 +806,11 @@ build is not misreported as a bad URL.  Always returns non-nil."
       (error
        (user-error "Cannot load the Chromel native module %s: %s"
                    chromel-native-module (error-message-string err))))
-    (setq chromel--module-loaded t)
+    ;; Only call it loaded once the API matched: a mismatch has to keep
+    ;; failing loudly instead of being skipped by the next caller.
     (chromel--check-module-api)
-    (chromel--apply-download-directory))
+    (chromel--apply-download-directory)
+    (setq chromel--module-loaded t))
   t)
 
 (defvar chromel--pac-server nil
@@ -1252,7 +1254,15 @@ takes; answering \"deny\" is always safe."
               (message "Chromel: denied %s for %s"
                        (string-join (nreverse denied) ", ") origin)
               (chromel--native-permission-reply id "deny"))
-          (let ((allow (or (null asked) (chromel--permission-ask origin asked))))
+          (let ((allow (null asked)))
+            ;; C-g must not leave the native callback parked: the event is
+            ;; already out of the queue, so a quit that escapes here would
+            ;; strand the page forever.
+            (unless allow
+              (condition-case nil
+                  (setq allow (chromel--permission-ask origin asked))
+                (quit (chromel--native-permission-reply id "deny")
+                      (signal 'quit nil))))
             (dolist (name asked)
               (puthash (concat origin "|" name) (and allow t) chromel--permission-answers))
             (chromel--native-permission-reply id (if allow "allow" "deny"))))))))
