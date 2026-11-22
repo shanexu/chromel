@@ -1066,7 +1066,7 @@ The matching rules live in the native layer, so Lisp and CEF cannot drift apart.
   "Open URL in a new browser buffer.
 With BACKGROUND non-nil, leave the selected buffer and keyboard focus alone.
 Management and Chrome Web Store URLs open a separate window and return nil."
-  (interactive (list (read-string "URL or search: " nil nil chromel-home-url)))
+  (interactive (list (chromel--read-url chromel-home-url)))
   (setq url (chromel--normalize-url (or url chromel-home-url)))
   (if (chromel--settings-url-p url)
       (progn (chromel-settings url) nil)
@@ -1099,19 +1099,54 @@ Management and Chrome Web Store URLs open a separate window and return nil."
 
 (defun chromel-open-url (url)
   "Navigate the current browser to URL."
-  (interactive (list (read-string "URL or search: " chromel--url)))
+  (interactive (list (chromel--read-url chromel--url)))
   (setq url (chromel--normalize-url url))
   (if (chromel--settings-url-p url)
       (chromel-settings url)
     (chromel--command "navigate" url)))
 (defvar chromel-url-history nil)
 
+(defun chromel--read-url-candidates ()
+  "Return (URL . TITLE) pairs for completion.
+Open tabs come first in tab order, then visited pages newest first.  A URL that
+is both open and in the history keeps the tab's title."
+  (let ((seen (make-hash-table :test #'equal))
+        (candidates nil))
+    (dolist (buffer (chromel--buffers))
+      (when (buffer-live-p buffer)
+        (let ((url (buffer-local-value 'chromel--url buffer)))
+          (when (and (stringp url) (not (gethash url seen)))
+            (puthash url t seen)
+            (push (cons url (buffer-local-value 'chromel--title buffer))
+                  candidates)))))
+    (dolist (item chromel--history)
+      (let ((url (plist-get item :url)))
+        (unless (gethash url seen)
+          (puthash url t seen)
+          (push (cons url (plist-get item :title)) candidates))))
+    (nreverse candidates)))
+
 (defun chromel--read-url (&optional initial)
-  "Read an address or search, completing visited URLs, with INITIAL text."
+  "Read an address or search, completing open tabs and visited pages.
+INITIAL is the text to start from; anything else the user types is accepted and
+goes through `chromel--normalize-url', so search terms still work."
   (chromel--history-load)
-  (completing-read "URL or search: "
-                   (delete-dups (mapcar (lambda (item) (plist-get item :url)) chromel--history))
-                   nil nil initial 'chromel-url-history))
+  (let* ((candidates (chromel--read-url-candidates))
+         (titles (let ((table (make-hash-table :test #'equal)))
+                   (dolist (candidate candidates)
+                     (puthash (car candidate) (cdr candidate) table))
+                   table)))
+    (minibuffer-with-setup-hook
+        (lambda ()
+          (setq-local
+           completion-extra-properties
+           (list :annotation-function
+                 (lambda (candidate)
+                   (let ((title (gethash candidate titles)))
+                     (when (and (stringp title) (not (equal title candidate)))
+                       (concat " " title)))))))
+      (completing-read "URL or search: " (mapcar #'car candidates)
+                       nil nil initial 'chromel-url-history))))
 
 (defun chromel-open (url)
   "Open URL in the current page, completing previously visited addresses."
