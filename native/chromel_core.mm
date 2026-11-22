@@ -200,9 +200,14 @@ class App final : public CefApp, public CefBrowserProcessHandler {
     // disposable, repeatedly re-signed test apps.  Production uses Keychain.
     if (testSwitches.hermetic && processType.empty()) {
       commandLine->AppendSwitch("use-mock-keychain");
-      // The GUI harness stacks disposable windows behind the user's terminal.
-      // Chromium throttles occluded windows, which made scripted navigation,
-      // rendering and key delivery miss their deadlines at random.
+    }
+    // An embedded browser is often not the key window: a fresh Emacs frame can
+    // be covered by the terminal, and a page may start loading while the user is
+    // typing in another window.  Chromium freezes backgrounded renderers, and a
+    // frozen renderer never issues its navigation at all -- the tab sits in
+    // "Loading" until the frame is focused again, which looks exactly like a
+    // dead proxy.  Keep those throttles off outside the tests too.
+    if (processType.empty()) {
       commandLine->AppendSwitch("disable-background-timer-throttling");
       commandLine->AppendSwitch("disable-renderer-backgrounding");
       commandLine->AppendSwitch("disable-backgrounding-occluded-windows");
