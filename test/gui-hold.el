@@ -47,7 +47,7 @@
         (chromel-test--until (format "%s<%s" position (- before 80)) "Held k did not reverse")
         (chromel--command "test-key-up" "k")
         (chromel-test--still position))
-      ;; Same physical observer + actual Emacs keymap/Meow dispatch.  The
+      ;; Same physical observer + actual Emacs keymap dispatch.  The
       ;; observer alone is deliberately insufficient to begin scrolling.
       (chromel--command "unfocus")
       (chromel--command "test-command-down" "j")
@@ -60,7 +60,7 @@
       (let ((before (chromel-test--js position)))
         (chromel--command "test-command-down" "j")
         (execute-kbd-macro "j")
-        (chromel-test--until (format "%s>%s" position (+ before 160)) "Meow command did not arm hold")
+        (chromel-test--until (format "%s>%s" position (+ before 160)) "The hold command did not arm hold")
         (chromel--command "test-command-up" "j")
         (chromel-test--still position))
       (chromel-test--assert (= 0 (chromel-test--js "scrollY")) "Iframe hold escaped to outer page")))
@@ -152,7 +152,7 @@
                    (setq chromel-test--phase 'closing)))
                 ('closing
                  (when (string-match-p "Browsers including DevTools: 0" (chromel--native-info))
-                   (chromel-test--finish t (format "Physical hold/release: iframe routing, repeat independence, Meow dispatch/keymap override, selection cancellation, reversal, overlapping taps, instant/reduced-motion repeats; steady velocity %S CSS px/s" chromel-test--measurements))))))
+                   (chromel-test--finish t (format "Physical hold/release: iframe routing, repeat independence, keymap override, selection cancellation, reversal, overlapping taps, instant/reduced-motion repeats; steady velocity %S CSS px/s" chromel-test--measurements))))))
           (error (chromel-test--finish nil (error-message-string err))))))))
 (run-at-time 1 nil
              (lambda ()

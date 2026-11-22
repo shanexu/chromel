@@ -117,7 +117,7 @@
                    (setq chromel-test--phase 'closing)))
                 ('closing
                  (when (string-match-p "Browsers including DevTools: 0" (chromel--native-info))
-                   (chromel-test--finish t "Scrolling: same/cross-origin nested focus, keyboard parent/root return with Meow, smooth samples, repeated distance, reversal, wheel cancellation, instant mode")))))
+                   (chromel-test--finish t "Scrolling: same/cross-origin nested focus, keyboard parent/root return through the browser keymap, smooth samples, repeated distance, reversal, wheel cancellation, instant mode")))))
           (error (chromel-test--finish nil (error-message-string err))))))))
 
 (run-at-time 1 nil

@@ -4,6 +4,8 @@
 (when (require 'meow nil t)
   (meow-motion-define-key '("j" . meow-next) '("k" . meow-prev))
   (meow-global-mode 1))
+(unless (bound-and-true-p meow-global-mode)
+  (message "SKIP: meow integration (meow is not installed)"))
 (setq chromel-data-directory (file-name-as-directory (getenv "CHROMEL_TEST_PROFILE")))
 (defvar chromel-test--source nil)
 (defvar chromel-test--background nil)
