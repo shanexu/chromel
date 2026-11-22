@@ -1026,3 +1026,36 @@
                (lambda () (user-error "Chromel module API 99 does not match elisp 7"))))
       (should-error (chromel--ensure-module) :type 'user-error)
       (should-not chromel--module-loaded))))
+
+(ert-deftest chromel-read-url-candidates-put-tabs-before-history ()
+  "Open tabs win over history, and the tab's title is kept."
+  (let ((tab (generate-new-buffer " *chromel-tab*"))
+        (chromel--history (list (list :url "https://b.example/" :title "B title" :time 2)
+                                (list :url "https://a.example/" :title "A title" :time 1))))
+    (unwind-protect
+        (progn
+          (with-current-buffer tab
+            (setq-local chromel--url "https://a.example/"
+                        chromel--title "A tab"))
+          (cl-letf (((symbol-function 'chromel--buffers) (lambda () (list tab))))
+            (should (equal (chromel--read-url-candidates)
+                           '(("https://a.example/" . "A tab")
+                             ("https://b.example/" . "B title"))))))
+      (kill-buffer tab))))
+
+(ert-deftest chromel-read-url-offers-tabs-and-history ()
+  "The minibuffer gets every candidate and keeps INITIAL editable."
+  (let (collection initial)
+    (cl-letf (((symbol-function 'chromel--history-load) (lambda () nil))
+              ((symbol-function 'chromel--read-url-candidates)
+               (lambda ()
+                 '(("https://a.example/" . "A")
+                   ("https://b.example/" . "B"))))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt candidates &optional _predicate _require _initial _history)
+                 (setq collection candidates
+                       initial _initial)
+                 "typed search")))
+      (should (equal (chromel--read-url "https://start/") "typed search"))
+      (should (equal collection '("https://a.example/" "https://b.example/")))
+      (should (equal initial "https://start/")))))
