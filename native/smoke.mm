@@ -71,10 +71,14 @@ int main(int argc, char** argv) {
       @autoreleasepool {
       chromel::initialize(NSBundle.mainBundle.bundlePath.UTF8String, argv[2]);
       handle = chromel::bind_window("Chromel native smoke");
+      // The title is assembled in script: the address event carries this whole
+      // data URL, so a literal marker here would satisfy the title check on its
+      // own even if title reporting were broken.
       id = chromel::create(handle,
-          "data:text/html,<meta charset=utf-8><title>chromel-smoke-ready</title>"
+          "data:text/html,<meta charset=utf-8><title>pending</title>"
           "<body style='background:%23273846;color:white;font:32px sans-serif'>"
-          "CEF inside a native NSView<input placeholder='Keyboard test'></body>");
+          "CEF inside a native NSView<input placeholder='Keyboard test'>"
+          "<script>document.title=['chromel-smoke-','ready'].join('')</script></body>");
       chromel::layout(id, handle, 20, 40, 600, 400);
       }
       bool loaded = false, title = false;
@@ -83,8 +87,9 @@ int main(int argc, char** argv) {
         step();
         auto events = chromel::events();
         if (events != "[]") printf("%s\n", events.c_str());
-        loaded |= events.find("loaded") != std::string::npos;
-        title |= events.find("chromel-smoke-ready") != std::string::npos;
+        loaded |= events.find("\"type\":\"loaded\"") != std::string::npos;
+        title |= events.find("\"type\":\"title\"") != std::string::npos &&
+                 events.find("chromel-smoke-ready") != std::string::npos;
       }
       if (!loaded || !title) throw std::runtime_error("Timed out waiting for renderer/title/load callbacks");
       @autoreleasepool { chromel::hide(id); }
@@ -103,7 +108,7 @@ int main(int argc, char** argv) {
       while (deadline.timeIntervalSinceNow > 0 && !closed) {
         step();
         auto events = chromel::events();
-        closed = events.find("closed") != std::string::npos;
+        closed = events.find("\"type\":\"closed\"") != std::string::npos;
       }
       if (!closed) throw std::runtime_error("Browser did not close cleanly");
       if (!first.visible || !second.visible) throw std::runtime_error("Closing browser closed a host window");

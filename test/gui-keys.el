@@ -61,11 +61,14 @@
                                   (format "%s did not reach Emacs: got %S, wanted %S"
                                           (nth 0 pair) got want))))
         (kill-buffer chromel-test--buffer)
-        (let ((deadline (+ (float-time) 3)))
+        (let ((deadline (+ (float-time) 3))
+              (done nil))
           (while (and (< (float-time) deadline)
-                      (not (string-match-p "Browsers including DevTools: 0" (chromel--native-info))))
+                      (not (setq done (string-match-p "Browsers including DevTools: 0"
+                                                      (chromel--native-info)))))
             (chromel--tick)
-            (accept-process-output nil 0.02)))
+            (accept-process-output nil 0.02))
+          (chromel-test--assert done "The closed browser never left the registry"))
         (chromel-test--finish t "C-x, C-c and C-h reach Emacs while a page is focused"))
     (error (chromel-test--finish nil (error-message-string error)))))
 (defun chromel-test--start ()

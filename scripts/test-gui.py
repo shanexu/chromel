@@ -53,6 +53,16 @@ with tempfile.TemporaryDirectory(prefix="chromel-smoke-") as smoke_dir:
 
 class Fixture(http.server.BaseHTTPRequestHandler):
     def do_GET(self):
+        # A proxied request arrives in absolute form (http://host/path).  The
+        # PAC test relies on this to prove the request really took that path.
+        if self.path.startswith("http://"):
+            payload = b"<meta charset=utf-8><title>proxied-fixture</title><body>proxy"
+            self.send_response(200)
+            self.send_header("Content-Type", "text/html; charset=utf-8")
+            self.send_header("Content-Length", str(len(payload)))
+            self.end_headers()
+            self.wfile.write(payload)
+            return
         body = b"""<!doctype html><meta charset=utf-8><title>starting</title>
         <style>body {background:#273846;color:white;font:28px sans-serif}</style>
         <h1>CEF in Emacs</h1><input placeholder='Input test'>

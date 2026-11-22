@@ -40,12 +40,16 @@
          "The fixture never loaded" 20)
         (let ((first (chromel-test--file "chromel-fixture.txt")))
           (chromel-test--fetch "/download")
-          (chromel-test--until (lambda () (file-exists-p first))
-                               "The download never appeared" 20)
-          (with-temp-buffer
-            (insert-file-contents first)
-            (chromel-test--assert (equal (buffer-string) "chromel download fixture\n")
-                                  (format "Wrong contents: %S" (buffer-string))))
+          ;; The file appears when the download starts, not when it is written:
+          ;; wait for the bytes, otherwise the read below races the writer.
+          (chromel-test--until
+           (lambda ()
+             (and (file-exists-p first)
+                  (equal (with-temp-buffer
+                           (insert-file-contents first)
+                           (buffer-string))
+                         "chromel download fixture\n")))
+           "The download never appeared with its contents" 20)
           ;; Chromium allows one automatic download per page, and a page that
           ;; just handed one to the download manager stops running scripts, so
           ;; the second copy comes from a fresh tab and a real click.  A trusted
