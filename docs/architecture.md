@@ -335,6 +335,8 @@ kill-emacs → chromel--shutdown → native-shutdown
 
 ### 4.16 代理：命令行 PAC + 一个回环小服务
 
+同一条回调里还始终加上 `disable-background-timer-throttling`、`disable-renderer-backgrounding`、`disable-backgrounding-occluded-windows`：嵌在 Emacs 里的浏览器经常不是 key window，而 Chromium 对被遮挡/后置的渲染进程会冻结到连导航请求都不发出，表现为页面停在 `Loading`，看起来像代理失效。
+
 代理配置只有一条路：`OnBeforeCommandLineProcessing` 里 `AppendSwitchWithValue("proxy-pac-url", …)`。Chromium 在浏览器进程启动时读一次，之后不再接受修改；CEF 没有 `chrome.proxy` 的等价物（代理偏好定义在 `//chrome` 层，CEF 不链接），所以 `chromel-proxy-pac-file` 的改动只在下次启动生效。
 
 生成器（`scripts/smartproxy-to-pac.py`）除了手写规则，还会展开 SmartProxy 的规则订阅（`gfwlist` 等）成一张域名表，按后缀逐级查表，避免每个请求做几千次比较；订阅只存 URL 不存规则，所以生成时要联网（`--fetch-proxy` 支持走本地代理）。
@@ -450,7 +452,7 @@ Emacs.app/Contents/
 | 层 | 手段 |
 |---|---|
 | 纯 Elisp 逻辑 | `test/chromel-test.el` 等 56 个 ERT（`emacs --batch`，无 GUI；缺原生模块时 5 条自动跳过，故 Linux CI 也能跑） |
-| 真实渲染/输入 | `scripts/test-gui.py` 拉起独立 Emacs 进程（统一 `-l test/gui-frame.el` 固定在 1100×750 的 frame），本地 HTTP fixture，`CHROMEL_CEF_TEST_MODE=1`（临时 profile、mock keychain、禁用后台节流） |
+| 真实渲染/输入 | `scripts/test-gui.py` 拉起独立 Emacs 进程（统一 `-l test/gui-frame.el` 固定在 1100×750 的 frame），本地 HTTP fixture，`CHROMEL_CEF_TEST_MODE=1`（临时 profile、mock keychain） |
 | 事件泵 | `chromel-pump-probe` 记录 `NSApp.run` 重入次数（必须为 0） |
 | 原生冒烟 | `build/ChromelRuntime.app/Contents/MacOS/ChromelRuntime --smoke-test <临时 profile>`，`test-gui.py` 在拉起 GUI 之前自动跑一次 |
 | 构建门禁 | 套件启动前先构建 `chromel-module`，失败即退出（避免用旧 dylib 跑绿） |
