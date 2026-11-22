@@ -39,7 +39,9 @@ directory when chromel/ does not exist.  No data is moved automatically.
 Do not point this at a Chrome profile.  Restart Emacs after changing it."
   :type 'directory)
 (defcustom chromel-home-url "https://example.org"
-  "Page opened by `chromel' when no URL is supplied." :type 'string)
+  "Page opened by `chromel' when the prompt is submitted empty.
+Set it to the page you actually want, or to \"about:blank\" for a blank tab."
+  :type 'string)
 (defcustom chromel-search-url "https://duckduckgo.com/?q=%s"
   "URL template for input that is not navigable.
 %s is replaced by the percent-encoded query, so the template must contain
@@ -1066,7 +1068,9 @@ The matching rules live in the native layer, so Lisp and CEF cannot drift apart.
   "Open URL in a new browser buffer.
 With BACKGROUND non-nil, leave the selected buffer and keyboard focus alone.
 Management and Chrome Web Store URLs open a separate window and return nil."
-  (interactive (list (chromel--read-url chromel-home-url)))
+  ;; No initial text: prefilling the home page meant every M-x chromel started
+  ;; with a URL to delete.  RET on an empty prompt still opens it.
+  (interactive (list (chromel--read-url)))
   (setq url (chromel--normalize-url (or url chromel-home-url)))
   (if (chromel--settings-url-p url)
       (progn (chromel-settings url) nil)

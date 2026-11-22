@@ -1059,3 +1059,17 @@
       (should (equal (chromel--read-url "https://start/") "typed search"))
       (should (equal collection '("https://a.example/" "https://b.example/")))
       (should (equal initial "https://start/")))))
+
+(ert-deftest chromel-read-url-starts-empty-when-no-initial-is-given ()
+  "`M-x chromel' must not prefill the home page."
+  (let (initial seen)
+    (cl-letf (((symbol-function 'chromel--history-load) (lambda () nil))
+              ((symbol-function 'chromel--read-url-candidates) (lambda () nil))
+              ((symbol-function 'completing-read)
+               (lambda (_prompt _candidates &optional _predicate _require init _history)
+                 (setq initial init
+                       seen t)
+                 "")))
+      (should (equal (chromel--read-url) ""))
+      (should seen)
+      (should (null initial)))))

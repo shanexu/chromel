@@ -92,6 +92,8 @@ EMACS_INCLUDE_DIR=/path/to/emacs/include ./scripts/build.sh
 
 执行 `M-x chromel` 输入地址。也可调用 `(chromel "https://example.org")`。无协议域名默认使用 HTTPS，`localhost:端口` 默认 HTTP，包含空格的输入作为搜索词。
 
+提示框不会预填地址：直接回车（空输入）打开 `chromel-home-url`（默认 `https://example.org`，按需改成自己的主页或 `about:blank`）。
+
 输入地址时会补全已打开的标签和浏览历史（按标签顺序、再按访问时间倒序，后面跟着标题），`M-n`/`M-p` 或方向键翻候选；补全列表只用于挑地址，直接输入新地址或搜索词照常生效。`C-c w o`（`chromel-open`）补全同一份候选，只是把当前页导航过去。
 
 ## 在 Emacs 与网页间切换
